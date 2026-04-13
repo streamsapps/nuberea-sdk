@@ -38,6 +38,9 @@ function usage(): void {
     tools                    List all available tools
     tool <name> [args_json]  Call a tool by name
                              e.g., nuberea tool bible_kjv_get_verse '{"book":"John","chapter":1,"verse":1}'
+    resources                List available MCP resources
+    resource <uri>           Read an MCP resource by URI
+    mcp <method> [params]    Send a raw MCP JSON-RPC request
 
   ANALYTICS
     query <sql>              Execute a SQL query
@@ -55,6 +58,7 @@ function usage(): void {
   OPTIONS
     --json                   Output raw JSON (default: formatted)
     --limit <n>              Row limit for queries (default: 100)
+    --session                Use MCP session mode (initialize + session tracking)
     --base-url <url>         Override API base URL
     --token <token>          Use pre-set access token
 
@@ -114,6 +118,7 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
     firebaseToken: process.env.NUBEREA_FIREBASE_TOKEN,
+    useSession: !!flags.session,
   });
 }
 
@@ -347,6 +352,63 @@ async function cmdHebrew(client: NuBerea, args: string[], raw: boolean): Promise
   }
 }
 
+async function cmdResources(client: NuBerea, raw: boolean): Promise<void> {
+  const resources = await client.resources();
+
+  if (raw) {
+    console.log(formatJson(resources, true));
+    return;
+  }
+
+  console.log(`\n${resources.length} resources:\n`);
+  for (const r of resources) {
+    console.log(`  ${r.uri}`);
+    if (r.description) {
+      console.log(`    ${r.description.substring(0, 80)}`);
+    }
+  }
+  console.log();
+}
+
+async function cmdResource(client: NuBerea, args: string[], raw: boolean): Promise<void> {
+  const uri = args[0];
+  if (!uri) die('Usage: nuberea resource <uri>');
+
+  const contents = await client.resource(uri);
+
+  if (raw) {
+    console.log(formatJson(contents, true));
+    return;
+  }
+
+  for (const content of contents) {
+    console.log(`\n--- ${content.uri} (${content.mimeType ?? 'text/plain'}) ---`);
+    if (content.text) {
+      console.log(content.text);
+    } else if (content.blob) {
+      console.log(`[binary: ${content.blob.length} bytes base64]`);
+    }
+  }
+  console.log();
+}
+
+async function cmdMcpRaw(client: NuBerea, args: string[], raw: boolean): Promise<void> {
+  const method = args[0];
+  if (!method) die('Usage: nuberea mcp <method> [params_json]');
+
+  let params: Record<string, unknown> | undefined;
+  if (args[1]) {
+    try {
+      params = JSON.parse(args[1]);
+    } catch {
+      die(`Invalid JSON: ${args[1]}`);
+    }
+  }
+
+  const result = await client.mcpRequest(method, params);
+  console.log(formatJson(result, !raw));
+}
+
 // ============================================================================
 // Main
 // ============================================================================
@@ -379,6 +441,12 @@ async function main(): Promise<void> {
   switch (command) {
     case 'tool':
       return cmdTool(client, args, raw);
+    case 'resources':
+      return cmdResources(client, raw);
+    case 'resource':
+      return cmdResource(client, args, raw);
+    case 'mcp':
+      return cmdMcpRaw(client, args, raw);
     case 'query':
     case 'sql':
       return cmdQuery(client, args, flags, raw);

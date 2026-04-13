@@ -1,7 +1,7 @@
 {
   "name": "@nuberea/sdk",
-  "version": "0.1.0",
-  "description": "NuBerea SDK — Client library for the NuBerea biblical data platform. Query morphological corpora, lexicons, Bible texts, manuscripts, and scrolls via MCP or REST.",
+  "version": "0.0.1",
+  "description": "NuBerea SDK — Client library for the NuBerea biblical data platform. Query morphological corpora, lexicons, Bible texts, manuscripts, and scrolls.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -51,13 +51,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/NuBerea/nuberea-sdk"
+    "url": "https://github.com/streamsapps/nuberea-sdk"
   },
   "homepage": "https://nuberea.com",
   "engines": {
     "node": ">=18"
   },
-  "dependencies": {},
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",

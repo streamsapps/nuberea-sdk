@@ -7,6 +7,7 @@
  *   3. Token persistence and refresh
  */
 
+import { exec } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -300,7 +301,6 @@ function generatePkce(): { verifier: string; challenge: string } {
 }
 
 function openBrowser(url: string): void {
-  const { exec } = require('node:child_process') as typeof import('node:child_process');
   const cmd =
     process.platform === 'darwin'
       ? `open "${url}"`

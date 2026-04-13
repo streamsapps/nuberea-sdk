@@ -134,10 +134,10 @@ const client = new NuBerea({
 
 ## Authentication
 
-NuBerea uses OAuth 2.1 with PKCE, backed by Firebase Auth.
+NuBerea uses OAuth 2.1 with PKCE.
 
 1. `nuberea login` opens your browser to `nuberea.com/login`
-2. Sign in with Google/email
+2. Sign in to your nuberea account
 3. Tokens are stored at `~/.nuberea/tokens.json` (mode 0600)
 4. Tokens auto-refresh — you rarely need to re-login
 

@@ -6,6 +6,12 @@
  */
 
 import { NuBereaAuth, type AuthConfig } from './auth.js';
+import {
+  McpClient,
+  type McpInitializeResult,
+  type McpResource,
+  type McpResourceContent,
+} from './mcp.js';
 import type {
   ToolResult,
   ToolInfo,
@@ -28,6 +34,8 @@ export interface NuBereaConfig {
   accessToken?: string;
   /** Pre-set Firebase token (skip browser sign-in) */
   firebaseToken?: string;
+  /** Use MCP session mode (initialize + session tracking) vs stateless */
+  useSession?: boolean;
 }
 
 export type NuBereaTokens = {
@@ -44,12 +52,15 @@ export class NuBerea {
   private mcpUrl: string;
   private staticToken: string | undefined;
   private firebaseToken: string | undefined;
+  private useSession: boolean;
+  private mcpClient: McpClient | null = null;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
     this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? `${this.baseUrl}/mcp`;
     this.staticToken = config?.accessToken;
     this.firebaseToken = config?.firebaseToken;
+    this.useSession = config?.useSession ?? false;
 
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
@@ -91,14 +102,106 @@ export class NuBerea {
     return this.auth.getAccessToken();
   }
 
+  /**
+   * Get (or create) the MCP client instance.
+   * Handles token refresh automatically.
+   */
+  private async getMcpClient(): Promise<McpClient> {
+    const token = await this.getToken();
+
+    if (!this.mcpClient) {
+      this.mcpClient = new McpClient({
+        mcpUrl: this.mcpUrl,
+        accessToken: token,
+        useSession: this.useSession,
+      });
+    } else {
+      // Update token in case it was refreshed
+      this.mcpClient.setAccessToken(token);
+    }
+
+    return this.mcpClient;
+  }
+
+  // ==========================================================================
+  // MCP Protocol — Full MCP operations
+  // ==========================================================================
+
+  /**
+   * Initialize an MCP session. Required in session mode before other calls.
+   * In stateless mode (default), this is a no-op.
+   */
+  async initialize(): Promise<McpInitializeResult | null> {
+    if (!this.useSession) return null;
+    const mcp = await this.getMcpClient();
+    return mcp.initialize();
+  }
+
+  /**
+   * Send a raw MCP JSON-RPC request.
+   * Use this for any MCP method not covered by the typed methods.
+   */
+  async mcpRequest(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    const mcp = await this.getMcpClient();
+    const res = await mcp.request(method, params);
+    if (res.error) throw new Error(`MCP error: ${JSON.stringify(res.error)}`);
+    return res.result;
+  }
+
+  /**
+   * List available MCP resources.
+   */
+  async resources(): Promise<McpResource[]> {
+    const mcp = await this.getMcpClient();
+    return mcp.listResources();
+  }
+
+  /**
+   * Read an MCP resource by URI.
+   *
+   * @example
+   * ```ts
+   * const contents = await client.resource('macula://hebrew');
+   * console.log(contents[0].text);
+   * ```
+   */
+  async resource(uri: string): Promise<McpResourceContent[]> {
+    const mcp = await this.getMcpClient();
+    return mcp.readResource(uri);
+  }
+
+  /**
+   * Close the MCP session (if session-based).
+   */
+  async close(): Promise<void> {
+    if (this.mcpClient) {
+      await this.mcpClient.close();
+      this.mcpClient = null;
+    }
+  }
+
+  /**
+   * Get the current MCP session ID (null in stateless mode).
+   */
+  getSessionId(): string | null {
+    return this.mcpClient?.getSessionId() ?? null;
+  }
+
   // ==========================================================================
   // MCP Tools
   // ==========================================================================
 
   /**
    * List all available MCP tools.
+   * Uses MCP tools/list in session mode, or the public /tools endpoint in stateless mode.
    */
   async tools(): Promise<ToolInfo[]> {
+    if (this.useSession) {
+      const mcp = await this.getMcpClient();
+      return mcp.listTools();
+    }
+
+    // Stateless: use public endpoint (no auth needed)
     const res = await fetch(`${this.baseUrl}/tools`);
     if (!res.ok) throw new Error(`Failed to list tools: HTTP ${res.status}`);
     const data = (await res.json()) as { tools: ToolInfo[] };
@@ -117,35 +220,8 @@ export class NuBerea {
    * ```
    */
   async tool(name: string, args: Record<string, unknown> = {}): Promise<ToolResult> {
-    const token = await this.getToken();
-
-    const res = await fetch(this.mcpUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json, text/event-stream',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: { name, arguments: args },
-        id: Date.now(),
-      }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`MCP tool call failed: HTTP ${res.status} — ${await res.text()}`);
-    }
-
-    const text = await res.text();
-    const parsed = this.parseMcpResponse(text, res.headers.get('content-type') ?? '');
-
-    if (parsed.error) {
-      throw new Error(`MCP error: ${JSON.stringify(parsed.error)}`);
-    }
-
-    return (parsed.result as ToolResult) ?? { content: [] };
+    const mcp = await this.getMcpClient();
+    return mcp.callTool(name, args);
   }
 
   /**
@@ -305,29 +381,4 @@ export class NuBerea {
     return this.toolText('macula_greek_query_verse', { book, chapter, verse });
   }
 
-  // ==========================================================================
-  // Internal
-  // ==========================================================================
-
-  private parseMcpResponse(
-    text: string,
-    contentType: string,
-  ): { result?: unknown; error?: unknown } {
-    // SSE format: look for last "data: " line
-    if (contentType.includes('text/event-stream')) {
-      for (const line of text.split('\n').reverse()) {
-        if (line.startsWith('data: ')) {
-          try {
-            return JSON.parse(line.slice(6));
-          } catch {
-            continue;
-          }
-        }
-      }
-      return { error: 'No parseable SSE data' };
-    }
-
-    // Plain JSON
-    return JSON.parse(text);
-  }
 }

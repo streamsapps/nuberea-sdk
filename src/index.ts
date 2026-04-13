@@ -30,6 +30,17 @@ export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { NuBereaAuth } from './auth.js';
 export type { AuthConfig } from './auth.js';
+export { McpClient, McpError } from './mcp.js';
+export type {
+  McpClientConfig,
+  McpServerInfo,
+  McpCapabilities,
+  McpInitializeResult,
+  McpResource,
+  McpResourceContent,
+  McpJsonRpcRequest,
+  McpJsonRpcResponse,
+} from './mcp.js';
 export type {
   ToolResult,
   ToolInfo,
