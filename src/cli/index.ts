@@ -64,8 +64,7 @@ function usage(): void {
 
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
-    NUBEREA_ACCESS_TOKEN     Pre-set access token
-    NUBEREA_FIREBASE_TOKEN   Pre-set Firebase token (skip browser)
+    NUBEREA_ACCESS_TOKEN     Pre-set access token (for CI/automation — use short-lived tokens only)
 `);
 }
 
@@ -117,7 +116,6 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
   return new NuBerea({
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
-    firebaseToken: process.env.NUBEREA_FIREBASE_TOKEN,
     useSession: !!flags.session,
   });
 }
@@ -129,16 +127,17 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
 async function cmdLogin(client: NuBerea): Promise<void> {
   console.log('Signing in to NuBerea...');
   await client.login();
-  console.log('✅ Authenticated. Tokens saved to ~/.nuberea/tokens.json');
+  console.log('✅ Authenticated. Credentials saved to OS Keychain (or state directory).');
 }
 
 async function cmdLogout(client: NuBerea): Promise<void> {
-  client.logout();
-  console.log('✅ Logged out. Tokens cleared.');
+  await client.logout();
+  console.log('✅ Logged out. Credentials cleared.');
 }
 
 async function cmdStatus(client: NuBerea): Promise<void> {
-  if (client.isAuthenticated()) {
+  const authed = await client.checkAuth();
+  if (authed) {
     console.log('✅ Authenticated');
   } else {
     console.log('❌ Not authenticated. Run: nuberea login');
@@ -433,7 +432,7 @@ async function main(): Promise<void> {
   if (command === 'tools') return cmdTools(client, raw);
 
   // All other commands need auth — ensure we have it
-  if (!client.isAuthenticated() && !flags.token && !process.env.NUBEREA_ACCESS_TOKEN) {
+  if (!flags.token && !process.env.NUBEREA_ACCESS_TOKEN && !await client.checkAuth()) {
     console.log('Not authenticated. Signing in...\n');
     await client.login();
   }

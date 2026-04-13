@@ -32,8 +32,6 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
-  /** Pre-set Firebase token (skip browser sign-in) */
-  firebaseToken?: string;
   /** Use MCP session mode (initialize + session tracking) vs stateless */
   useSession?: boolean;
 }
@@ -51,7 +49,6 @@ export class NuBerea {
   private baseUrl: string;
   private mcpUrl: string;
   private staticToken: string | undefined;
-  private firebaseToken: string | undefined;
   private useSession: boolean;
   private mcpClient: McpClient | null = null;
 
@@ -59,7 +56,6 @@ export class NuBerea {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
     this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? `${this.baseUrl}/mcp`;
     this.staticToken = config?.accessToken;
-    this.firebaseToken = config?.firebaseToken;
     this.useSession = config?.useSession ?? false;
 
     this.auth = new NuBereaAuth({
@@ -79,11 +75,24 @@ export class NuBerea {
    */
   async login(): Promise<void> {
     if (this.staticToken) return;
-    await this.auth.login(this.firebaseToken);
+    await this.auth.login();
   }
 
   /**
-   * Check if the client has valid credentials.
+   * Check if the client has valid credentials (loads from storage if needed).
+   */
+  async checkAuth(): Promise<boolean> {
+    if (this.staticToken) return true;
+    try {
+      await this.auth.getAccessToken();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Check if credentials are loaded in memory (does not read storage).
    */
   isAuthenticated(): boolean {
     return !!this.staticToken || this.auth.isAuthenticated();
@@ -92,9 +101,9 @@ export class NuBerea {
   /**
    * Clear stored credentials.
    */
-  logout(): void {
+  async logout(): Promise<void> {
     this.staticToken = undefined;
-    this.auth.logout();
+    await this.auth.logout();
   }
 
   private async getToken(): Promise<string> {

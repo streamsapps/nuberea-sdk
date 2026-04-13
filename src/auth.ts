@@ -9,10 +9,14 @@
 
 import { exec } from 'node:child_process';
 import crypto from 'node:crypto';
-import fs from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
-import path from 'node:path';
+import {
+  type PersistedTokens,
+  defaultTokenFile,
+  deleteTokens,
+  loadTokens,
+  saveTokens,
+} from './storage.js';
 
 export interface AuthConfig {
   /** OAuth server base URL */
@@ -31,12 +35,8 @@ export interface AuthConfig {
   loginUrl: string;
 }
 
-export interface StoredTokens {
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: number; // epoch ms
-  firebaseToken?: string;
-}
+/** Tokens kept in memory and persisted to keychain/file (no login credentials). */
+export type StoredTokens = PersistedTokens;
 
 const DEFAULT_CONFIG: AuthConfig = {
   oauthBaseUrl: 'https://auth.aws-dev.streamsappsgslbex.com',
@@ -44,7 +44,7 @@ const DEFAULT_CONFIG: AuthConfig = {
   clientId: 'mcp-client-test',
   callbackPort: 9876,
   firebaseAuthPort: 9875,
-  tokenFile: path.join(os.homedir(), '.nuberea', 'tokens.json'),
+  tokenFile: defaultTokenFile(),
   loginUrl: 'https://nuberea.com/login',
 };
 
@@ -64,9 +64,9 @@ export class NuBereaAuth {
    * Get a valid access token, refreshing or re-authenticating as needed.
    */
   async getAccessToken(): Promise<string> {
-    // Try loading from disk
+    // Try loading from keychain/disk
     if (!this.tokens) {
-      this.tokens = this.loadTokens();
+      this.tokens = await loadTokens(this.config.tokenFile);
     }
 
     // Still valid?
@@ -91,9 +91,10 @@ export class NuBereaAuth {
 
   /**
    * Run the full interactive login flow (opens browser).
+   * The Firebase credential is used only locally — it is never persisted.
    */
-  async login(firebaseToken?: string): Promise<StoredTokens> {
-    const fbToken = firebaseToken ?? await this.fetchFirebaseToken();
+  async login(): Promise<StoredTokens> {
+    const fbToken = await this.fetchFirebaseToken();
     const { verifier, challenge } = generatePkce();
     const code = await this.fetchAuthCode(fbToken, challenge);
     const tokenResponse = await this.exchangeCode(code, verifier);
@@ -102,10 +103,9 @@ export class NuBereaAuth {
       accessToken: tokenResponse.access_token,
       refreshToken: tokenResponse.refresh_token,
       expiresAt: Date.now() + tokenResponse.expires_in * 1000,
-      firebaseToken: fbToken,
     };
 
-    this.saveTokens(this.tokens);
+    await saveTokens(this.tokens, this.config.tokenFile);
     return this.tokens;
   }
 
@@ -138,30 +138,25 @@ export class NuBereaAuth {
       accessToken: data.access_token,
       refreshToken: data.refresh_token ?? this.tokens.refreshToken,
       expiresAt: Date.now() + data.expires_in * 1000,
-      firebaseToken: this.tokens.firebaseToken,
     };
 
-    this.saveTokens(this.tokens);
+    await saveTokens(this.tokens, this.config.tokenFile);
     return this.tokens;
   }
 
   /**
    * Clear stored tokens (logout).
    */
-  logout(): void {
+  async logout(): Promise<void> {
     this.tokens = null;
-    try {
-      fs.unlinkSync(this.config.tokenFile);
-    } catch {
-      // File may not exist
-    }
+    await deleteTokens(this.config.tokenFile);
   }
 
   /**
-   * Check if we have a valid (non-expired) token.
+   * Check if we have a valid (non-expired) token in memory.
+   * Call `getAccessToken()` to also load from storage.
    */
   isAuthenticated(): boolean {
-    if (!this.tokens) this.tokens = this.loadTokens();
     return !!this.tokens && this.tokens.expiresAt > Date.now() + 60_000;
   }
 
@@ -263,24 +258,6 @@ export class NuBereaAuth {
     return res.json() as Promise<TokenResponse>;
   }
 
-  // ==========================================================================
-  // Token persistence
-  // ==========================================================================
-
-  private loadTokens(): StoredTokens | null {
-    try {
-      const raw = fs.readFileSync(this.config.tokenFile, 'utf-8');
-      return JSON.parse(raw) as StoredTokens;
-    } catch {
-      return null;
-    }
-  }
-
-  private saveTokens(tokens: StoredTokens): void {
-    const dir = path.dirname(this.config.tokenFile);
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(this.config.tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 });
-  }
 }
 
 // ============================================================================
