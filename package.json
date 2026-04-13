@@ -57,6 +57,9 @@
   "engines": {
     "node": ">=18"
   },
+  "openclaw": {
+    "extensions": ["./dist/index.js"]
+  },
   "devDependencies": {
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
