@@ -2,7 +2,8 @@
   "id": "nuberea",
   "name": "@nuberea/sdk",
   "description": "NuBerea biblical data platform — MCP tools for Bible texts, Hebrew/Greek morphology, lexicons, and Dead Sea Scrolls",
-  "version": "0.0.3",
+  "version": "0.0.5",
+  "skills": ["nuberea"],
   "activation": {
     "onCapabilities": ["tool"]
   },

@@ -15,6 +15,7 @@
  *   nuberea_query             — SQL analytics across all biblical databases
  */
 
+import { definePluginEntry } from 'openclaw/plugin-sdk/plugin-entry';
 import { Type } from '@sinclair/typebox';
 import { NuBerea } from './client.js';
 
@@ -53,7 +54,7 @@ async function callTool(name: string, args: Record<string, unknown> = {}): Promi
 // runtime and the `openclaw` package ships only as a host-provided module.
 // ---------------------------------------------------------------------------
 
-const plugin = {
+export default definePluginEntry({
   id: 'nuberea',
   name: 'NuBerea',
   description:
@@ -174,6 +175,4 @@ const plugin = {
       },
     });
   },
-};
-
-export default plugin;
+});

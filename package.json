@@ -1,6 +1,6 @@
 {
   "name": "@nuberea/sdk",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "NuBerea SDK — Client library for the NuBerea biblical data platform. Query morphological corpora, lexicons, Bible texts, manuscripts, and scrolls.",
   "type": "module",
   "main": "dist/index.js",
@@ -20,6 +20,7 @@
   },
   "files": [
     "dist",
+    "nuberea",
     "README.md",
     "LICENSE",
     "openclaw.plugin.json"
@@ -61,7 +62,18 @@
   "openclaw": {
     "extensions": [
       "./dist/plugin.js"
-    ]
+    ],
+    "compat": {
+      "pluginApi": ">=2026.3.28",
+      "minGatewayVersion": "2026.3.28"
+    },
+    "build": {
+      "openclawVersion": "2026.4.11",
+      "pluginSdkVersion": "2026.4.11"
+    }
+  },
+  "peerDependencies": {
+    "openclaw": ">=2026.3.28"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
