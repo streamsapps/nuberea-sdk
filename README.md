@@ -80,6 +80,59 @@ nuberea introspect lsj
 nuberea tool bible_kjv_search_text '{"query":"love","limit":3}' --json
 ```
 
+## Data connectors (BYO-data)
+
+Register your own data so it becomes queryable through the NuBerea MCP server.
+A **connector** belongs to a **tenant** (your org unit); parameterized,
+SELECT-only SQL **tools** are registered against it. Two kinds are supported:
+`hf_dataset` (Hugging Face Parquet, public or gated) and `glue_athena` (AWS Glue
++ Athena over your own S3, via a secretless OIDC trust).
+
+### Library
+
+```ts
+import { NuBerea } from '@nuberea/sdk';
+
+const client = new NuBerea();
+await client.login();
+
+const tenant = await client.catalog.createTenant('My Org');
+
+// Hugging Face dataset (no trust needed)
+const connector = await client.catalog.createHfConnector(tenant.tenantId, {
+  repo: 'owner/name',
+  tableName: 'orders',
+  files: ['default/train/*.parquet'],
+});
+
+const result = await client.catalog.validateConnector(tenant.tenantId, connector.connectorId);
+console.log(result.status, result.columns);
+```
+
+### CLI
+
+```bash
+# tenants
+nuberea catalog tenants
+nuberea catalog tenant-create "My Org"
+
+# Hugging Face dataset connector → validate
+nuberea catalog add-hf <tenantId> owner/name orders "default/train/*.parquet"
+nuberea catalog validate <tenantId> <connectorId>
+
+# AWS Glue + Athena: trust → connector → validate
+nuberea catalog trust-aws <tenantId>
+nuberea catalog trust-role <tenantId> arn:aws:iam::<acct>:role/<name>
+nuberea catalog trust-verify <tenantId>
+nuberea catalog add-glue <tenantId> us-west-2 primary --databases sales --tables sales.orders
+nuberea catalog validate <tenantId> <connectorId>
+
+# tools
+nuberea catalog suggest-tools <tenantId> <connectorId> --max 5
+nuberea catalog register-tool <tenantId> '{"name":"orders_by_region", ... }'
+nuberea catalog tools <tenantId>
+```
+
 ## Available Databases
 
 | Schema | Table | Description | Rows |

@@ -30,6 +30,8 @@ export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { NuBereaAuth } from './auth.js';
 export type { AuthConfig } from './auth.js';
+export { CatalogClient } from './catalog.js';
+export type { CatalogClientConfig } from './catalog.js';
 export { McpClient, McpError } from './mcp.js';
 export type {
   McpClientConfig,
@@ -49,4 +51,29 @@ export type {
   TableInfo,
   ColumnInfo,
   SchemaIntrospection,
+  StatsEntry,
+  TrustStatus,
+  ConnectorStatus,
+  ToolStatus,
+  ConnectorKind,
+  HfAuthMode,
+  Tenant,
+  TenantSummary,
+  OidcIamTemplate,
+  TrustResult,
+  VerifyResult,
+  ConnectorScope,
+  GlueAthenaConnector,
+  HfDatasetConnector,
+  CatalogConnector,
+  GlueConnectorInput,
+  HfConnectorInput,
+  ScopedTable,
+  ValidateResult,
+  ToolInputSchema,
+  ParamBinding,
+  ToolRegistrationInput,
+  CatalogTool,
+  SuggestedToolDraft,
+  SuggestToolsResult,
 } from './types.js';
