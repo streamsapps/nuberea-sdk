@@ -55,10 +55,21 @@ function usage(): void {
     greek <word>             Look up Greek word in LSJ
     hebrew <strong>          Look up Hebrew Strong's number in BDB
 
-  OPTIONS
-    --json                   Output raw JSON (default: formatted)
-    --limit <n>              Row limit for queries (default: 100)
-    --session                Use MCP session mode (initialize + session tracking)
+  DATA CONNECTORS (BYO-data)
+    catalog tenants                      List the tenants you own
+    catalog tenant-create <name>         Create a tenant
+    catalog connectors <tenantId>        List a tenant's connectors
+    catalog add-hf <tenantId> <repo> <table> [files...]
+                                         Register a Hugging Face dataset connector
+    catalog add-glue <tenantId> <region> <workgroup> [--databases a,b] [--tables a.x]
+                                         Register an AWS Glue + Athena connector
+    catalog validate <tenantId> <connectorId>
+                                         Validate / activate a connector
+    catalog tools <tenantId>             List a tenant's tools
+    catalog suggest-tools <tenantId> <connectorId>
+                                         Draft parameterized tools from the schema
+    catalog trust-aws|trust-role|trust-verify <tenantId> [...]
+                                         AWS OIDC trust steps (glue only)
     --base-url <url>         Override API base URL
     --token <token>          Use pre-set access token
 
@@ -409,6 +420,144 @@ async function cmdMcpRaw(client: NuBerea, args: string[], raw: boolean): Promise
 }
 
 // ============================================================================
+// Catalog (BYO-data) commands
+// ============================================================================
+
+function csv(value: string | boolean | undefined): string[] {
+  if (typeof value !== 'string' || !value.trim()) return [];
+  return value.split(',').map((s) => s.trim()).filter(Boolean);
+}
+
+async function cmdCatalog(
+  client: NuBerea,
+  args: string[],
+  flags: Record<string, string | boolean>,
+  raw: boolean,
+): Promise<void> {
+  const sub = args[0];
+  const rest = args.slice(1);
+  const out = (data: unknown): void => console.log(formatJson(data, raw));
+
+  switch (sub) {
+    case 'tenants':
+      return out(await client.catalog.listTenants());
+
+    case 'tenant-create': {
+      const displayName = rest.join(' ').trim();
+      if (!displayName) die('Usage: nuberea catalog tenant-create <displayName>');
+      return out(await client.catalog.createTenant(displayName, flags.tier as string | undefined));
+    }
+
+    case 'tenant-delete': {
+      if (!rest[0]) die('Usage: nuberea catalog tenant-delete <tenantId>');
+      await client.catalog.deleteTenant(rest[0]);
+      return out({ deleted: rest[0] });
+    }
+
+    case 'connectors':
+      if (!rest[0]) die('Usage: nuberea catalog connectors <tenantId>');
+      return out(await client.catalog.listConnectors(rest[0]));
+
+    case 'add-hf': {
+      const [tenantId, repo, tableName, ...files] = rest;
+      if (!tenantId || !repo || !tableName) {
+        die('Usage: nuberea catalog add-hf <tenantId> <repo> <tableName> [files...] [--auth gated] [--revision <ref>] [--hf-resource <user>]');
+      }
+      return out(
+        await client.catalog.createHfConnector(tenantId, {
+          repo,
+          tableName,
+          files,
+          auth: flags.auth === 'gated' ? 'gated' : 'public',
+          revision: flags.revision as string | undefined,
+          hfResource: flags['hf-resource'] as string | undefined,
+        }),
+      );
+    }
+
+    case 'add-glue': {
+      const [tenantId, region, workgroup] = rest;
+      if (!tenantId || !region || !workgroup) {
+        die('Usage: nuberea catalog add-glue <tenantId> <region> <athenaWorkgroup> [--databases a,b] [--tables a.x,b.y]');
+      }
+      const databases = csv(flags.databases);
+      const tables = csv(flags.tables);
+      return out(
+        await client.catalog.createGlueConnector(tenantId, {
+          region,
+          athenaWorkgroup: workgroup,
+          ...(databases.length || tables.length ? { scope: { databases, ...(tables.length ? { tables } : {}) } } : {}),
+        }),
+      );
+    }
+
+    case 'validate': {
+      const [tenantId, connectorId] = rest;
+      if (!tenantId || !connectorId) die('Usage: nuberea catalog validate <tenantId> <connectorId>');
+      return out(await client.catalog.validateConnector(tenantId, connectorId));
+    }
+
+    case 'connector-delete': {
+      const [tenantId, connectorId] = rest;
+      if (!tenantId || !connectorId) die('Usage: nuberea catalog connector-delete <tenantId> <connectorId>');
+      await client.catalog.deleteConnector(tenantId, connectorId);
+      return out({ deleted: connectorId });
+    }
+
+    case 'suggest-tools': {
+      const [tenantId, connectorId] = rest;
+      if (!tenantId || !connectorId) die('Usage: nuberea catalog suggest-tools <tenantId> <connectorId> [--max <n>] [--prompt "<text>"]');
+      return out(
+        await client.catalog.suggestTools(tenantId, connectorId, {
+          maxSuggestions: flags.max ? parseInt(flags.max as string, 10) : undefined,
+          prompt: flags.prompt as string | undefined,
+        }),
+      );
+    }
+
+    case 'tools':
+      if (!rest[0]) die('Usage: nuberea catalog tools <tenantId>');
+      return out(await client.catalog.listTools(rest[0]));
+
+    case 'register-tool': {
+      const [tenantId, json] = rest;
+      if (!tenantId || !json) die('Usage: nuberea catalog register-tool <tenantId> <tool_json>');
+      let input: unknown;
+      try {
+        input = JSON.parse(json);
+      } catch {
+        die(`Invalid tool JSON: ${json}`);
+      }
+      return out(await client.catalog.registerTool(tenantId, input as Parameters<typeof client.catalog.registerTool>[1]));
+    }
+
+    case 'trust-aws':
+      if (!rest[0]) die('Usage: nuberea catalog trust-aws <tenantId>');
+      return out(await client.catalog.createAwsTrust(rest[0]));
+
+    case 'trust-role': {
+      const [tenantId, roleArn] = rest;
+      if (!tenantId || !roleArn) die('Usage: nuberea catalog trust-role <tenantId> <roleArn>');
+      return out(await client.catalog.setTrustRoleArn(tenantId, roleArn));
+    }
+
+    case 'trust-verify':
+      if (!rest[0]) die('Usage: nuberea catalog trust-verify <tenantId>');
+      return out(await client.catalog.verifyAwsTrust(rest[0]));
+
+    default:
+      die(
+        'Usage: nuberea catalog <subcommand>\n' +
+          '  tenants | tenant-create <name> | tenant-delete <id>\n' +
+          '  connectors <tenantId> | add-hf <tenantId> <repo> <table> [files...] | add-glue <tenantId> <region> <wg>\n' +
+          '  validate <tenantId> <connectorId> | connector-delete <tenantId> <connectorId>\n' +
+          '  suggest-tools <tenantId> <connectorId> | tools <tenantId> | register-tool <tenantId> <json>\n' +
+          '  trust-aws <tenantId> | trust-role <tenantId> <roleArn> | trust-verify <tenantId>',
+      );
+  }
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -465,6 +614,8 @@ async function main(): Promise<void> {
       return cmdGreek(client, args, raw);
     case 'hebrew':
       return cmdHebrew(client, args, raw);
+    case 'catalog':
+      return cmdCatalog(client, args, flags, raw);
     default:
       console.error(`Unknown command: ${command}`);
       usage();

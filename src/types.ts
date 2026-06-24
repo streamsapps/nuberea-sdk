@@ -69,3 +69,183 @@ export interface StatsEntry {
   table: string;
   rowCount: number;
 }
+
+// ============================================================================
+// Federated catalog (BYO-data) types
+//
+// These mirror the `/v1` catalog control plane served by the NuBerea MCP host.
+// A connector always belongs to a tenant (the org unit owned by the signed-in
+// user); queryable tools are registered against a connector. No customer
+// secrets are ever stored.
+// ============================================================================
+
+export type TrustStatus = 'pending' | 'active' | 'error';
+export type ConnectorStatus = 'pending' | 'active' | 'error';
+export type ToolStatus = 'draft' | 'active' | 'disabled';
+
+/** Supported connector kinds. */
+export type ConnectorKind = 'glue_athena' | 'hf_dataset';
+
+/** Secretless Hugging Face auth mode (private repos are not supported). */
+export type HfAuthMode = 'public' | 'gated';
+
+/** The org-level unit a federated grant belongs to. */
+export interface Tenant {
+  tenantId: string;
+  displayName: string;
+  tier?: string;
+  ownerSubjects: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Tenant row enriched with status counts (for dashboards / `catalog tenants`). */
+export interface TenantSummary {
+  tenantId: string;
+  displayName: string;
+  createdAt: string;
+  trustStatus: 'none' | TrustStatus;
+  connectorCount: number;
+  activeConnectorCount: number;
+  toolCount: number;
+  activeToolCount: number;
+}
+
+/** IAM artifacts the customer applies in their own AWS account (OIDC trust). */
+export interface OidcIamTemplate {
+  mode: 'oidc';
+  oidcProvider: { url: string; clientIdList: string[]; thumbprintNote: string };
+  trustPolicy: unknown;
+  permissionPolicy: unknown;
+  audience: string;
+  subject: string;
+}
+
+export interface TrustResult {
+  tenantId: string;
+  status: 'pending';
+  audience: string;
+  subject: string;
+  oidcTemplate: OidcIamTemplate;
+}
+
+export interface VerifyResult {
+  status: TrustStatus;
+  reason?: string;
+  assumedRoleArn?: string;
+}
+
+/** NuBerea-side allowlist of what a Glue/Athena connector may read. */
+export interface ConnectorScope {
+  databases: string[];
+  tables?: string[];
+}
+
+export interface GlueAthenaConnector {
+  tenantId: string;
+  connectorId: string;
+  kind: 'glue_athena';
+  region: string;
+  athenaWorkgroup: string;
+  scope: ConnectorScope;
+  status: ConnectorStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastValidatedAt?: string;
+  lastError?: string;
+}
+
+export interface HfDatasetConnector {
+  tenantId: string;
+  connectorId: string;
+  kind: 'hf_dataset';
+  repo: string;
+  revision?: string;
+  files: string[];
+  tableName: string;
+  auth: HfAuthMode;
+  hfResource?: string;
+  status: ConnectorStatus;
+  createdAt: string;
+  updatedAt: string;
+  lastValidatedAt?: string;
+  lastError?: string;
+}
+
+export type CatalogConnector = GlueAthenaConnector | HfDatasetConnector;
+
+/** Parameters to create a Glue + Athena connector. */
+export interface GlueConnectorInput {
+  region: string;
+  athenaWorkgroup: string;
+  scope?: ConnectorScope;
+}
+
+/** Parameters to create a Hugging Face dataset connector. */
+export interface HfConnectorInput {
+  repo: string;
+  tableName: string;
+  files?: string[];
+  auth?: HfAuthMode;
+  revision?: string;
+  hfResource?: string;
+}
+
+export interface ScopedTable {
+  database: string;
+  table: string;
+  columns: Array<{ name: string; type: string }>;
+}
+
+export interface ValidateResult {
+  status: TrustStatus;
+  reason?: string;
+  /** glue_athena */
+  tables?: ScopedTable[];
+  /** hf_dataset */
+  columns?: string[];
+  sample?: Array<Record<string, unknown>>;
+}
+
+export interface ToolInputSchema {
+  type: 'object';
+  properties: Record<string, { type: string; description?: string; enum?: unknown[] }>;
+  required?: string[];
+}
+
+export interface ParamBinding {
+  sqlParam: string;
+  type: 'string' | 'number' | 'integer' | 'boolean' | 'date';
+  default?: unknown;
+  max?: number;
+}
+
+export interface ToolRegistrationInput {
+  name: string;
+  connectorId: string;
+  description: string;
+  inputSchema: ToolInputSchema;
+  sqlTemplate: string;
+  paramBindings: Record<string, ParamBinding>;
+  rowLimit: number;
+}
+
+export interface CatalogTool extends ToolRegistrationInput {
+  tenantId: string;
+  toolId: string;
+  status: ToolStatus;
+  version: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SuggestedToolDraft extends ToolRegistrationInput {
+  rationale: string;
+}
+
+export interface SuggestToolsResult {
+  connectorId: string;
+  suggestions: SuggestedToolDraft[];
+  generatedAt: string;
+}

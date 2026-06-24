@@ -6,6 +6,7 @@
  */
 
 import { NuBereaAuth, type AuthConfig } from './auth.js';
+import { CatalogClient } from './catalog.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -51,6 +52,7 @@ export class NuBerea {
   private staticToken: string | undefined;
   private useSession: boolean;
   private mcpClient: McpClient | null = null;
+  private catalogClient: CatalogClient | null = null;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
@@ -109,6 +111,25 @@ export class NuBerea {
   private async getToken(): Promise<string> {
     if (this.staticToken) return this.staticToken;
     return this.auth.getAccessToken();
+  }
+
+  // ==========================================================================
+  // Federated catalog (BYO-data) control plane
+  // ==========================================================================
+
+  /**
+   * Access the BYO-data catalog control plane: tenants, AWS OIDC trust,
+   * connectors, and the parameterized SQL tools registered against them. 
+   * Reuses this client's OAuth token automatically.
+   */
+  get catalog(): CatalogClient {
+    if (!this.catalogClient) {
+      this.catalogClient = new CatalogClient({
+        baseUrl: this.baseUrl,
+        getToken: () => this.getToken(),
+      });
+    }
+    return this.catalogClient;
   }
 
   /**
