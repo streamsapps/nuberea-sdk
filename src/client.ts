@@ -224,6 +224,11 @@ export class NuBerea {
   /**
    * List all available MCP tools.
    * Uses MCP tools/list in session mode, or the public /tools endpoint in stateless mode.
+   *
+   * The `/tools` endpoint is identity-aware: when a bearer token is sent, the
+   * caller tenant's active BYO-data catalog tools are merged into the built-in
+   * roster. The token is attached best-effort — unauthenticated callers still
+   * get the built-in roster rather than an error.
    */
   async tools(): Promise<ToolInfo[]> {
     if (this.useSession) {
@@ -231,8 +236,16 @@ export class NuBerea {
       return mcp.listTools();
     }
 
-    // Stateless: use public endpoint (no auth needed)
-    const res = await fetch(`${this.baseUrl}/tools`);
+    // Stateless: use the identity-aware public endpoint. Send the OAuth token
+    // when we have one so tenant catalog tools are included.
+    const headers: Record<string, string> = {};
+    try {
+      headers.Authorization = `Bearer ${await this.getToken()}`;
+    } catch {
+      // Not signed in — fall back to the anonymous (built-ins only) response.
+    }
+
+    const res = await fetch(`${this.baseUrl}/tools`, { headers });
     if (!res.ok) throw new Error(`Failed to list tools: HTTP ${res.status}`);
     const data = (await res.json()) as { tools: ToolInfo[] };
     return data.tools;
