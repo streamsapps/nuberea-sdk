@@ -4,11 +4,9 @@ name: Publish to npm
 #   npm version <patch|minor|major>   # writes package.json + creates the tag
 #   git push origin main --follow-tags
 #
-# Authentication is npm Trusted Publishing (OIDC) — the same trusted-publisher
-# model Hugging Face uses. There is no npm token: the job mints a short-lived
-# OIDC token that npm exchanges for a scoped, single-publish credential. That
-# also sidesteps EOTP, which any long-lived token hits in CI unless it is
-# specifically a classic Automation token.
+# Authentication is npm Trusted Publishing (OIDC). 
+# There is no npm token: the job mints a short-lived
+# OIDC token that npm exchanges for a scoped, single-publish credential.
 #
 # Requires a trusted publisher configured at
 #   npmjs.com → @nuberea/sdk → Settings → Trusted Publisher
