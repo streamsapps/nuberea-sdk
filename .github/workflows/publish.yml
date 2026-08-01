@@ -4,35 +4,55 @@ name: Publish to npm
 #   npm version <patch|minor|major>   # writes package.json + creates the tag
 #   git push origin main --follow-tags
 #
-# The token lives in the NPM_TOKEN repo secret rather than on a developer's
-# laptop. It must be a **classic Automation** token — the account has 2FA, and
-# any other token type makes `npm publish` fail with EOTP in a non-interactive
-# environment.
+# Authentication is npm Trusted Publishing (OIDC) — the same trusted-publisher
+# model Hugging Face uses. There is no npm token: the job mints a short-lived
+# OIDC token that npm exchanges for a scoped, single-publish credential. That
+# also sidesteps EOTP, which any long-lived token hits in CI unless it is
+# specifically a classic Automation token.
+#
+# Requires a trusted publisher configured at
+#   npmjs.com → @nuberea/sdk → Settings → Trusted Publisher
+# with organization `streamsapps`, repository `nuberea-sdk`, and workflow
+# filename `publish.yml`. All fields are case-sensitive, and npm does not
+# validate them when saved — a mismatch only surfaces here as ENEEDAUTH.
+#
+# Provenance attestations are generated automatically (public repo + public
+# package + OIDC), so no --provenance flag is needed.
 on:
   push:
     tags:
       - 'v*'
   workflow_dispatch:
 
+# Trusted publishing needs npm >= 11.5.1, which ships with Node 24. Node 22
+# still bundles npm 10 and would fail to authenticate.
 env:
-  NODE_VERSION: '22'
+  NODE_VERSION: '24'
 
 jobs:
   publish:
     name: Build and Publish
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      id-token: write # Mint the OIDC token npm exchanges to publish.
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          # Required for NODE_AUTH_TOKEN to be written into .npmrc.
           registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false # Never cache in a release build.
+
+      - name: Show toolchain versions
+        run: |
+          node -v
+          npm -v
 
       - name: Install dependencies
         run: npm ci
@@ -58,7 +78,6 @@ jobs:
 
       # `--access public` is required: the package is scoped and package.json
       # sets no publishConfig, so npm would otherwise default to restricted.
+      # No token env: authentication is OIDC via the trusted publisher.
       - name: Publish
         run: npm publish --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
