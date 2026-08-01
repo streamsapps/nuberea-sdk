@@ -109,6 +109,31 @@ const result = await client.catalog.validateConnector(tenant.tenantId, connector
 console.log(result.status, result.columns);
 ```
 
+#### Gated Hugging Face datasets
+
+Gated datasets are read with a short-lived, read-only token minted through HF
+[Trusted Publishers](https://huggingface.co/docs/hub/trusted-publishers). Register
+NuBerea's issuer under your HF account's **Authentication settings → CI/CD
+Access**, then tell the tenant which account to use. The account is stored once
+per tenant, so every gated connector under it shares one identity.
+
+```ts
+await client.catalog.setHfIdentity(tenant.tenantId, 'your-hf-username');
+
+const check = await client.catalog.verifyHfIdentity(tenant.tenantId);
+if (check.status !== 'active') throw new Error(check.reason);
+
+await client.catalog.createHfConnector(tenant.tenantId, {
+  repo: 'owner/gated-name',
+  tableName: 'lexicon',
+  files: ['data/train/*.parquet'],
+  auth: 'gated',
+});
+```
+
+Private repos are not supported: Trusted-Publisher tokens can read gated repos
+you have access to, but never private ones.
+
 ### CLI
 
 ```bash
@@ -118,6 +143,12 @@ nuberea catalog tenant-create "My Org"
 
 # Hugging Face dataset connector → validate
 nuberea catalog add-hf <tenantId> owner/name orders "default/train/*.parquet"
+nuberea catalog validate <tenantId> <connectorId>
+
+# Gated Hugging Face: set the tenant's HF account once, then add connectors
+nuberea catalog hf-identity-set <tenantId> your-hf-username
+nuberea catalog hf-identity-verify <tenantId>
+nuberea catalog add-hf <tenantId> owner/gated-name lexicon "data/train/*.parquet" --auth gated
 nuberea catalog validate <tenantId> <connectorId>
 
 # AWS Glue + Athena: trust → connector → validate

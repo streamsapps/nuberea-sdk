@@ -30,6 +30,8 @@ import type {
   GlueConnectorInput,
   HfConnectorInput,
   HfDatasetConnector,
+  HfIdentity,
+  HfIdentityVerifyResult,
   SuggestToolsResult,
   Tenant,
   TenantSummary,
@@ -125,6 +127,29 @@ export class CatalogClient {
     return this.request<VerifyResult>('POST', `/v1/tenants/${enc(tenantId)}/trust/aws/verify`, {});
   }
 
+  // ----------------------------------------------------------- HF identity
+  /** The tenant's Hugging Face account, used by every gated connector. */
+  getHfIdentity(tenantId: string): Promise<HfIdentity> {
+    return this.request<HfIdentity>('GET', `/v1/tenants/${enc(tenantId)}/hf-identity`);
+  }
+
+  /**
+   * Set or change the tenant's HF username. Resets the identity to `pending` —
+   * call `verifyHfIdentity` to prove the token exchange works.
+   */
+  setHfIdentity(tenantId: string, hfUsername: string): Promise<HfIdentity> {
+    return this.request<HfIdentity>('PUT', `/v1/tenants/${enc(tenantId)}/hf-identity`, { hfUsername });
+  }
+
+  /**
+   * Prove the Trusted-Publisher exchange works for the tenant's HF account.
+   * Cheap (a token mint, no dataset read), so it is safe to re-run often —
+   * an HF account rename invalidates every gated connector at once.
+   */
+  verifyHfIdentity(tenantId: string): Promise<HfIdentityVerifyResult> {
+    return this.request<HfIdentityVerifyResult>('POST', `/v1/tenants/${enc(tenantId)}/hf-identity/verify`, {});
+  }
+
   // -------------------------------------------------------------- connectors
   /** Create an AWS Glue + Athena connector (requires an active trust). */
   createGlueConnector(tenantId: string, params: GlueConnectorInput): Promise<GlueAthenaConnector> {
@@ -144,6 +169,7 @@ export class CatalogClient {
       files: params.files ?? [],
       auth: params.auth ?? 'public',
       ...(params.revision ? { revision: params.revision } : {}),
+      // Seeds the tenant HF identity when unset; ignored once one exists.
       ...(params.hfResource ? { hfResource: params.hfResource } : {}),
     });
   }

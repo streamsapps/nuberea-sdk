@@ -164,12 +164,35 @@ export interface HfDatasetConnector {
   files: string[];
   tableName: string;
   auth: HfAuthMode;
-  hfResource?: string;
   status: ConnectorStatus;
   createdAt: string;
   updatedAt: string;
   lastValidatedAt?: string;
   lastError?: string;
+}
+
+/**
+ * A tenant's Hugging Face account — the identity gated connectors mint their
+ * short-lived read tokens against. Held once per tenant, so renaming an HF
+ * account is a single change rather than one per connector.
+ */
+export interface HfIdentity {
+  tenantId: string;
+  /** The HF username used as the token-exchange resource. */
+  username: string;
+  /** Immutable HF account id, recorded at verification when available. */
+  hfUserId?: string;
+  status: TrustStatus;
+  lastVerifiedAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface HfIdentityVerifyResult {
+  status: TrustStatus;
+  username?: string;
+  reason?: string;
 }
 
 export type CatalogConnector = GlueAthenaConnector | HfDatasetConnector;
@@ -188,6 +211,11 @@ export interface HfConnectorInput {
   files?: string[];
   auth?: HfAuthMode;
   revision?: string;
+  /**
+   * HF username for `gated` datasets. Convenience only: it seeds the tenant's
+   * HF identity when none is set yet, and is **ignored** once one exists. To
+   * change the account, use `setHfIdentity`.
+   */
   hfResource?: string;
 }
 

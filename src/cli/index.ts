@@ -70,6 +70,10 @@ function usage(): void {
                                          Draft parameterized tools from the schema
     catalog trust-aws|trust-role|trust-verify <tenantId> [...]
                                          AWS OIDC trust steps (glue only)
+    catalog hf-identity-set <tenantId> <hfUsername>
+                                         Set the tenant's Hugging Face account (gated datasets)
+    catalog hf-identity-verify <tenantId>
+                                         Prove the HF token exchange works
     --base-url <url>         Override API base URL
     --token <token>          Use pre-set access token
 
@@ -470,6 +474,8 @@ async function cmdCatalog(
           files,
           auth: flags.auth === 'gated' ? 'gated' : 'public',
           revision: flags.revision as string | undefined,
+          // Seeds the tenant HF identity when unset; ignored once one exists.
+          // Use `hf-identity-set` to change it.
           hfResource: flags['hf-resource'] as string | undefined,
         }),
       );
@@ -545,6 +551,20 @@ async function cmdCatalog(
       if (!rest[0]) die('Usage: nuberea catalog trust-verify <tenantId>');
       return out(await client.catalog.verifyAwsTrust(rest[0]));
 
+    case 'hf-identity':
+      if (!rest[0]) die('Usage: nuberea catalog hf-identity <tenantId>');
+      return out(await client.catalog.getHfIdentity(rest[0]));
+
+    case 'hf-identity-set': {
+      const [tenantId, hfUsername] = rest;
+      if (!tenantId || !hfUsername) die('Usage: nuberea catalog hf-identity-set <tenantId> <hfUsername>');
+      return out(await client.catalog.setHfIdentity(tenantId, hfUsername));
+    }
+
+    case 'hf-identity-verify':
+      if (!rest[0]) die('Usage: nuberea catalog hf-identity-verify <tenantId>');
+      return out(await client.catalog.verifyHfIdentity(rest[0]));
+
     default:
       die(
         'Usage: nuberea catalog <subcommand>\n' +
@@ -552,7 +572,8 @@ async function cmdCatalog(
           '  connectors <tenantId> | add-hf <tenantId> <repo> <table> [files...] | add-glue <tenantId> <region> <wg>\n' +
           '  validate <tenantId> <connectorId> | connector-delete <tenantId> <connectorId>\n' +
           '  suggest-tools <tenantId> <connectorId> | tools <tenantId> | register-tool <tenantId> <json>\n' +
-          '  trust-aws <tenantId> | trust-role <tenantId> <roleArn> | trust-verify <tenantId>',
+          '  trust-aws <tenantId> | trust-role <tenantId> <roleArn> | trust-verify <tenantId>\n' +
+          '  hf-identity <tenantId> | hf-identity-set <tenantId> <hfUsername> | hf-identity-verify <tenantId>',
       );
   }
 }

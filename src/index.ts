@@ -65,6 +65,8 @@ export type {
   ConnectorScope,
   GlueAthenaConnector,
   HfDatasetConnector,
+  HfIdentity,
+  HfIdentityVerifyResult,
   CatalogConnector,
   GlueConnectorInput,
   HfConnectorInput,
