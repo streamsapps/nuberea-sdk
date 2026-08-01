@@ -118,6 +118,10 @@ Access**, then tell the tenant which account to use. The account is stored once
 per tenant, so every gated connector under it shares one identity.
 
 ```ts
+// The exact values to paste into HF. Available before an identity exists.
+const setup = await client.catalog.getHfSetup(tenant.tenantId);
+// { issuer, audience: 'https://huggingface.co', subject: 'tenant:<id>:workload:hf' }
+
 await client.catalog.setHfIdentity(tenant.tenantId, 'your-hf-username');
 
 const check = await client.catalog.verifyHfIdentity(tenant.tenantId);
@@ -134,6 +138,26 @@ await client.catalog.createHfConnector(tenant.tenantId, {
 Private repos are not supported: Trusted-Publisher tokens can read gated repos
 you have access to, but never private ones.
 
+If you rename your Hugging Face account, call `setHfIdentity` again — one write
+fixes every gated connector, because the username is stored per tenant rather
+than per connector.
+
+#### Changing an existing connector
+
+`updateHfConnector` changes a connector's auth mode, revision or files while
+leaving its registered tools intact — useful when a repo flips from public to
+gated. `repo` and `tableName` are deliberately not updatable: tools select FROM
+the table name and were validated against that dataset's columns, so pointing
+elsewhere means creating a new connector.
+
+The connector returns to `pending` (which hides its tools from discovery), so
+validate straight after:
+
+```ts
+await client.catalog.updateHfConnector(tenantId, connectorId, { auth: 'gated' });
+const result = await client.catalog.validateConnector(tenantId, connectorId);
+```
+
 ### CLI
 
 ```bash
@@ -146,9 +170,14 @@ nuberea catalog add-hf <tenantId> owner/name orders "default/train/*.parquet"
 nuberea catalog validate <tenantId> <connectorId>
 
 # Gated Hugging Face: set the tenant's HF account once, then add connectors
+nuberea catalog hf-identity-setup <tenantId>   # values to paste into HF CI/CD Access
 nuberea catalog hf-identity-set <tenantId> your-hf-username
 nuberea catalog hf-identity-verify <tenantId>
 nuberea catalog add-hf <tenantId> owner/gated-name lexicon "data/train/*.parquet" --auth gated
+nuberea catalog validate <tenantId> <connectorId>
+
+# change a connector without rebuilding it (tools survive), then re-validate
+nuberea catalog update-hf <tenantId> <connectorId> --auth gated
 nuberea catalog validate <tenantId> <connectorId>
 
 # AWS Glue + Athena: trust → connector → validate
@@ -157,6 +186,12 @@ nuberea catalog trust-role <tenantId> arn:aws:iam::<acct>:role/<name>
 nuberea catalog trust-verify <tenantId>
 nuberea catalog add-glue <tenantId> us-west-2 primary --databases sales --tables sales.orders
 nuberea catalog validate <tenantId> <connectorId>
+
+# inspect or remove a connection (removal is refused while connectors still use it)
+nuberea catalog trust <tenantId>
+nuberea catalog hf-identity <tenantId>
+nuberea catalog trust-delete <tenantId>
+nuberea catalog hf-identity-delete <tenantId>
 
 # tools
 nuberea catalog suggest-tools <tenantId> <connectorId> --max 5

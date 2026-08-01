@@ -195,6 +195,42 @@ export interface HfIdentityVerifyResult {
   reason?: string;
 }
 
+/**
+ * The exact values to register under Hugging Face's Authentication settings →
+ * CI/CD Access. Available before an identity exists — it is what you need in
+ * order to create one. Note the issuer is NuBerea, not huggingface.co, which is
+ * the audience.
+ */
+export interface HfSetup {
+  issuer: string;
+  audience: string;
+  subject: string;
+}
+
+/** A tenant's AWS trust binding. Holds no secret — role ARN and audience only. */
+export interface AwsTrust {
+  tenantId: string;
+  provider: 'aws';
+  roleArn: string;
+  audience?: string;
+  status: TrustStatus;
+  lastAssumedAt?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Fields of an existing HF connector that can be changed. `repo` and
+ * `tableName` are absent on purpose: registered tools select FROM the table
+ * name and were validated against that dataset's columns.
+ */
+export interface HfConnectorUpdate {
+  auth?: HfAuthMode;
+  revision?: string;
+  files?: string[];
+}
+
 export type CatalogConnector = GlueAthenaConnector | HfDatasetConnector;
 
 /** Parameters to create a Glue + Athena connector. */

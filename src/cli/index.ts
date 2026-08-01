@@ -70,6 +70,10 @@ function usage(): void {
                                          Draft parameterized tools from the schema
     catalog trust-aws|trust-role|trust-verify <tenantId> [...]
                                          AWS OIDC trust steps (glue only)
+    catalog update-hf <tenantId> <connectorId> [files...] [--auth gated] [--revision <ref>]
+                                         Change an HF connector without touching its tools
+    catalog hf-identity-setup <tenantId>
+                                         Values to register under HF CI/CD Access
     catalog hf-identity-set <tenantId> <hfUsername>
                                          Set the tenant's Hugging Face account (gated datasets)
     catalog hf-identity-verify <tenantId>
@@ -503,6 +507,21 @@ async function cmdCatalog(
       return out(await client.catalog.validateConnector(tenantId, connectorId));
     }
 
+    case 'update-hf': {
+      const [tenantId, connectorId, ...files] = rest;
+      if (!tenantId || !connectorId) {
+        die('Usage: nuberea catalog update-hf <tenantId> <connectorId> [files...] [--auth public|gated] [--revision <ref>]');
+      }
+      const auth = flags.auth === 'gated' ? 'gated' : flags.auth === 'public' ? 'public' : undefined;
+      return out(
+        await client.catalog.updateHfConnector(tenantId, connectorId, {
+          ...(auth ? { auth } : {}),
+          ...(flags.revision ? { revision: flags.revision as string } : {}),
+          ...(files.length ? { files } : {}),
+        }),
+      );
+    }
+
     case 'connector-delete': {
       const [tenantId, connectorId] = rest;
       if (!tenantId || !connectorId) die('Usage: nuberea catalog connector-delete <tenantId> <connectorId>');
@@ -551,9 +570,27 @@ async function cmdCatalog(
       if (!rest[0]) die('Usage: nuberea catalog trust-verify <tenantId>');
       return out(await client.catalog.verifyAwsTrust(rest[0]));
 
+    case 'trust':
+      if (!rest[0]) die('Usage: nuberea catalog trust <tenantId>');
+      return out(await client.catalog.getAwsTrust(rest[0]));
+
+    case 'trust-delete':
+      if (!rest[0]) die('Usage: nuberea catalog trust-delete <tenantId>');
+      await client.catalog.deleteAwsTrust(rest[0]);
+      return out({ deleted: rest[0] });
+
     case 'hf-identity':
       if (!rest[0]) die('Usage: nuberea catalog hf-identity <tenantId>');
       return out(await client.catalog.getHfIdentity(rest[0]));
+
+    case 'hf-identity-setup':
+      if (!rest[0]) die('Usage: nuberea catalog hf-identity-setup <tenantId>');
+      return out(await client.catalog.getHfSetup(rest[0]));
+
+    case 'hf-identity-delete':
+      if (!rest[0]) die('Usage: nuberea catalog hf-identity-delete <tenantId>');
+      await client.catalog.deleteHfIdentity(rest[0]);
+      return out({ deleted: rest[0] });
 
     case 'hf-identity-set': {
       const [tenantId, hfUsername] = rest;
@@ -570,10 +607,12 @@ async function cmdCatalog(
         'Usage: nuberea catalog <subcommand>\n' +
           '  tenants | tenant-create <name> | tenant-delete <id>\n' +
           '  connectors <tenantId> | add-hf <tenantId> <repo> <table> [files...] | add-glue <tenantId> <region> <wg>\n' +
+          '  update-hf <tenantId> <connectorId> [files...] [--auth public|gated] [--revision <ref>]\n' +
           '  validate <tenantId> <connectorId> | connector-delete <tenantId> <connectorId>\n' +
           '  suggest-tools <tenantId> <connectorId> | tools <tenantId> | register-tool <tenantId> <json>\n' +
-          '  trust-aws <tenantId> | trust-role <tenantId> <roleArn> | trust-verify <tenantId>\n' +
-          '  hf-identity <tenantId> | hf-identity-set <tenantId> <hfUsername> | hf-identity-verify <tenantId>',
+          '  trust <tenantId> | trust-aws <tenantId> | trust-role <tenantId> <roleArn> | trust-verify <tenantId> | trust-delete <tenantId>\n' +
+          '  hf-identity <tenantId> | hf-identity-setup <tenantId> | hf-identity-set <tenantId> <hfUsername>\n' +
+          '  hf-identity-verify <tenantId> | hf-identity-delete <tenantId>',
       );
   }
 }

@@ -24,14 +24,17 @@
  */
 
 import type {
+  AwsTrust,
   CatalogConnector,
   CatalogTool,
   GlueAthenaConnector,
   GlueConnectorInput,
   HfConnectorInput,
+  HfConnectorUpdate,
   HfDatasetConnector,
   HfIdentity,
   HfIdentityVerifyResult,
+  HfSetup,
   SuggestToolsResult,
   Tenant,
   TenantSummary,
@@ -112,6 +115,15 @@ export class CatalogClient {
   }
 
   // ------------------------------------------------------------- AWS trust
+  /** The tenant's AWS trust binding, or null when none is configured. */
+  async getAwsTrust(tenantId: string): Promise<AwsTrust | null> {
+    try {
+      return await this.request<AwsTrust>('GET', `/v1/tenants/${enc(tenantId)}/trust/aws`);
+    } catch {
+      return null;
+    }
+  }
+
   /** Begin an AWS OIDC trust; returns the IAM artifacts to apply in the customer account. */
   createAwsTrust(tenantId: string): Promise<TrustResult> {
     return this.request<TrustResult>('POST', `/v1/tenants/${enc(tenantId)}/trust/aws`, {});
@@ -125,6 +137,11 @@ export class CatalogClient {
   /** Verify the trust by attempting the role assumption. */
   verifyAwsTrust(tenantId: string): Promise<VerifyResult> {
     return this.request<VerifyResult>('POST', `/v1/tenants/${enc(tenantId)}/trust/aws/verify`, {});
+  }
+
+  /** Remove the trust. Refused while Glue/Athena connectors still use it. */
+  deleteAwsTrust(tenantId: string): Promise<void> {
+    return this.request<void>('DELETE', `/v1/tenants/${enc(tenantId)}/trust/aws`);
   }
 
   // ----------------------------------------------------------- HF identity
@@ -148,6 +165,19 @@ export class CatalogClient {
    */
   verifyHfIdentity(tenantId: string): Promise<HfIdentityVerifyResult> {
     return this.request<HfIdentityVerifyResult>('POST', `/v1/tenants/${enc(tenantId)}/hf-identity/verify`, {});
+  }
+
+  /**
+   * The issuer, audience and subject to register under HF Authentication
+   * settings → CI/CD Access. Works before an identity exists.
+   */
+  getHfSetup(tenantId: string): Promise<HfSetup> {
+    return this.request<HfSetup>('GET', `/v1/tenants/${enc(tenantId)}/hf-identity/setup`);
+  }
+
+  /** Remove the tenant's HF account. Refused while gated connectors still use it. */
+  deleteHfIdentity(tenantId: string): Promise<void> {
+    return this.request<void>('DELETE', `/v1/tenants/${enc(tenantId)}/hf-identity`);
   }
 
   // -------------------------------------------------------------- connectors
@@ -180,6 +210,22 @@ export class CatalogClient {
       `/v1/tenants/${enc(tenantId)}/connectors`,
     );
     return connectors;
+  }
+
+  /**
+   * Change an existing HF connector's auth mode, revision or files. The
+   * connector returns to `pending`, so call `validateConnector` afterwards.
+   */
+  updateHfConnector(
+    tenantId: string,
+    connectorId: string,
+    params: HfConnectorUpdate,
+  ): Promise<HfDatasetConnector> {
+    return this.request<HfDatasetConnector>(
+      'PATCH',
+      `/v1/tenants/${enc(tenantId)}/connectors/${enc(connectorId)}`,
+      params,
+    );
   }
 
   /** Dry-run connectivity from raw params without persisting a connector. */
