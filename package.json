@@ -1,6 +1,6 @@
 {
   "name": "@nuberea/sdk",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "NuBerea SDK — Client library for the NuBerea biblical data platform. Query morphological corpora, lexicons, Bible texts, manuscripts, and scrolls.",
   "type": "module",
   "main": "dist/index.js",
