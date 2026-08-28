@@ -80,6 +80,46 @@ nuberea introspect lsj
 nuberea tool bible_kjv_search_text '{"query":"love","limit":3}' --json
 ```
 
+## Subscribe to NuBerea Plus
+
+The SDK can create a Stripe-hosted Checkout session for a monthly or yearly
+NuBerea Plus subscription. Payment details are entered only on Stripe; neither
+the SDK nor an AI agent can receive them.
+
+### CLI
+
+```bash
+# Open Stripe Checkout in the browser
+nuberea subscribe monthly
+nuberea subscribe yearly
+
+# Agent/non-interactive form: return JSON without opening a browser
+nuberea subscribe monthly --no-open --json
+```
+
+`--json` is side-effect free and never opens a browser; `--no-open` is shown
+explicitly so the command's intent remains clear in agent logs.
+
+The JSON response contains `sessionId`, `url`, and `billingCycle`. Present the
+`https://checkout.stripe.com/...` URL to the user and let them complete payment
+in their browser. Reuse the returned URL instead of creating repeated sessions.
+
+### Library
+
+```ts
+import { NuBerea } from '@nuberea/sdk';
+
+const client = new NuBerea();
+await client.login();
+
+const checkout = await client.createSubscriptionCheckout('yearly');
+console.log(checkout.url);
+```
+
+OAuth identity links the resulting Stripe subscription to the same NuBerea
+entitlement used by web and iOS. An existing active Apple or Stripe subscription
+is rejected before a new Checkout session is created.
+
 ## Data connectors (BYO-data)
 
 Register your own data so it becomes queryable through the NuBerea MCP server.
@@ -239,6 +279,7 @@ Run `nuberea tools` to see the full list.
 | Variable | Description |
 |---|---|
 | `NUBEREA_BASE_URL` | API base URL (default: `https://auth.aws-dev.streamsappsgslbex.com`) |
+| `NUBEREA_BILLING_BASE_URL` | Subscription API base URL (default: `https://api.aws-dev.streamsappsgslbex.com/mcp-dev`) |
 | `NUBEREA_ACCESS_TOKEN` | Pre-set access token (skip login) |
 | `NUBEREA_FIREBASE_TOKEN` | Pre-set Firebase token (skip browser sign-in) |
 
@@ -247,6 +288,7 @@ Run `nuberea tools` to see the full list.
 ```ts
 const client = new NuBerea({
   baseUrl: 'https://auth.aws-dev.streamsappsgslbex.com',
+  billingBaseUrl: 'https://api.aws-dev.streamsappsgslbex.com/mcp-dev',
   accessToken: 'your-token', // Skip login
 });
 ```

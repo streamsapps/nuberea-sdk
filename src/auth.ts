@@ -7,9 +7,9 @@
  *   3. Token persistence and refresh
  */
 
-import { exec } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { openBrowser } from './browser.js';
 import {
   type PersistedTokens,
   defaultTokenFile,
@@ -270,21 +270,8 @@ interface TokenResponse {
   token_type: string;
   expires_in: number;
 }
-
 function generatePkce(): { verifier: string; challenge: string } {
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   return { verifier, challenge };
-}
-
-function openBrowser(url: string): void {
-  const cmd =
-    process.platform === 'darwin'
-      ? `open "${url}"`
-      : process.platform === 'win32'
-        ? `start "" "${url}"`
-        : `xdg-open "${url}"`;
-  exec(cmd, () => {
-    // Ignore errors — user can open manually
-  });
 }
