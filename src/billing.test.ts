@@ -29,7 +29,7 @@ describe('BillingClient', () => {
       billingCycle: 'monthly',
     });
     expect(fetch).toHaveBeenCalledWith(
-      'https://billing.example.test/stripe/checkout-link',
+      'https://billing.example.test/subscription/checkout-link',
       expect.objectContaining({ method: 'POST' }),
     );
   });

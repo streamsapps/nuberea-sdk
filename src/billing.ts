@@ -33,7 +33,7 @@ export class BillingClient {
       throw new Error('billingCycle must be monthly or yearly');
     }
 
-    const response = await this.fetch(`${this.baseUrl}/stripe/checkout-link`, {
+    const response = await this.fetch(`${this.baseUrl}/subscription/checkout-link`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${await this.getToken()}`,
