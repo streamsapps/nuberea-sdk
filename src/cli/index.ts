@@ -33,6 +33,7 @@ function usage(): void {
     login                    Sign in (opens browser)
     logout                   Clear stored credentials
     status                   Check authentication status
+    account-delete --confirm Permanently delete the signed-in NuBerea account
 
   MCP TOOLS
     tools                    List all available tools
@@ -79,10 +80,12 @@ function usage(): void {
     catalog hf-identity-verify <tenantId>
                                          Prove the HF token exchange works
     --base-url <url>         Override API base URL
+    --account-api-url <url> Override account lifecycle API base URL
     --token <token>          Use pre-set access token
 
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
+    NUBEREA_ACCOUNT_API_URL Account lifecycle API base URL
     NUBEREA_ACCESS_TOKEN     Pre-set access token (for CI/automation — use short-lived tokens only)
 `);
 }
@@ -134,6 +137,7 @@ function formatJson(data: unknown, raw: boolean): string {
 function createClient(flags: Record<string, string | boolean>): NuBerea {
   return new NuBerea({
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
+    accountApiBaseUrl: (flags['account-api-url'] as string) ?? process.env.NUBEREA_ACCOUNT_API_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
     useSession: !!flags.session,
   });
@@ -161,6 +165,13 @@ async function cmdStatus(client: NuBerea): Promise<void> {
   } else {
     console.log('❌ Not authenticated. Run: nuberea login');
   }
+}
+
+async function cmdDeleteAccount(client: NuBerea, confirmed: boolean, raw: boolean): Promise<void> {
+  if (!confirmed) die('Account deletion requires --confirm. This action cannot be undone.');
+  console.log('Reauthentication is required. Opening the NuBerea sign-in page...');
+  const acceptance = await client.deleteAccount();
+  console.log(formatJson(acceptance, raw));
 }
 
 async function cmdTools(client: NuBerea, raw: boolean): Promise<void> {
@@ -636,6 +647,7 @@ async function main(): Promise<void> {
   if (command === 'login') return cmdLogin(client);
   if (command === 'logout') return cmdLogout(client);
   if (command === 'status') return cmdStatus(client);
+  if (command === 'account-delete') return cmdDeleteAccount(client, !!flags.confirm, raw);
 
   // Tools listing doesn't need auth (public endpoint)
   if (command === 'tools') return cmdTools(client, raw);

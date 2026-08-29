@@ -17,6 +17,7 @@ import {
   loadTokens,
   saveTokens,
 } from './storage.js';
+import { requestAccountDeletion, type AccountDeletionAcceptance } from './account.js';
 
 export interface AuthConfig {
   /** OAuth server base URL */
@@ -33,6 +34,8 @@ export interface AuthConfig {
   tokenFile: string;
   /** Login page URL for browser-based sign-in */
   loginUrl: string;
+  /** Account lifecycle API base URL */
+  accountApiBaseUrl: string;
 }
 
 /** Tokens kept in memory and persisted to keychain/file (no login credentials). */
@@ -46,6 +49,7 @@ const DEFAULT_CONFIG: AuthConfig = {
   firebaseAuthPort: 9875,
   tokenFile: defaultTokenFile(),
   loginUrl: 'https://nuberea.com/login',
+  accountApiBaseUrl: 'https://api.nubereappe.com/v1',
 };
 
 export class NuBereaAuth {
@@ -150,6 +154,16 @@ export class NuBereaAuth {
   async logout(): Promise<void> {
     this.tokens = null;
     await deleteTokens(this.config.tokenFile);
+  }
+
+  async deleteAccount(): Promise<AccountDeletionAcceptance> {
+    const firebaseIdToken = await this.fetchFirebaseToken();
+    const acceptance = await requestAccountDeletion(
+      this.config.accountApiBaseUrl,
+      firebaseIdToken,
+    );
+    await this.logout();
+    return acceptance;
   }
 
   /**

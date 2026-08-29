@@ -28,6 +28,8 @@
 
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
+export { AccountDeletionError, requestAccountDeletion } from './account.js';
+export type { AccountDeletionAcceptance } from './account.js';
 export { NuBereaAuth } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
