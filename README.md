@@ -44,6 +44,15 @@ const rows = await client.query(`
 console.log(rows.rows);
 ```
 
+Account deletion requires a fresh interactive sign-in and returns after the
+server has durably accepted the request and disabled access. Cleanup continues
+asynchronously under the returned request ID.
+
+```ts
+const deletion = await client.deleteAccount();
+console.log(deletion.requestId, deletion.state); // DELETING
+```
+
 ### As a CLI
 
 ```bash
@@ -75,6 +84,9 @@ nuberea query "SELECT * FROM hebrew.morphemes WHERE book_id = 'Gen' AND chapter 
 nuberea databases
 nuberea describe hebrew morphemes
 nuberea introspect lsj
+
+# Permanently delete the account after interactive reauthentication
+nuberea account-delete --confirm
 
 # Raw JSON output
 nuberea tool bible_kjv_search_text '{"query":"love","limit":3}' --json

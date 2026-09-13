@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import type { AccountDeletionAcceptance } from './account.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -33,6 +34,8 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
+  /** Override: account lifecycle API base URL */
+  accountApiBaseUrl?: string;
   /** Use MCP session mode (initialize + session tracking) vs stateless */
   useSession?: boolean;
 }
@@ -63,6 +66,7 @@ export class NuBerea {
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
       mcpUrl: this.mcpUrl,
+      accountApiBaseUrl: config?.accountApiBaseUrl,
       ...config?.auth,
     });
   }
@@ -106,6 +110,14 @@ export class NuBerea {
   async logout(): Promise<void> {
     this.staticToken = undefined;
     await this.auth.logout();
+  }
+
+  async deleteAccount(): Promise<AccountDeletionAcceptance> {
+    const acceptance = await this.auth.deleteAccount();
+    this.staticToken = undefined;
+    this.mcpClient = null;
+    this.catalogClient = null;
+    return acceptance;
   }
 
   private async getToken(): Promise<string> {
