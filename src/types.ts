@@ -10,10 +10,12 @@ export interface ToolInfo {
   name: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
 }
 
 export interface ToolResult {
   content: Array<{ type: string; text: string }>;
+  structuredContent?: Record<string, unknown>;
   isError?: boolean;
 }
 

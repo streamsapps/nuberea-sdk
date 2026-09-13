@@ -80,6 +80,95 @@ nuberea introspect lsj
 nuberea tool bible_kjv_search_text '{"query":"love","limit":3}' --json
 ```
 
+## Historical Sources network
+
+The `historical` client provides read-only, snapshot-pinned search, passage
+inspection, relationship evidence and bounded graph expansion. It uses the
+same authenticated MCP connection as the other SDK tools. The server must
+have a published Historical Sources snapshot enabled.
+
+```ts
+const results = await client.historical.search({
+  query: 'λόγος',
+  method: 'lexical',
+});
+
+const first = results.hits[0];
+if (first) {
+  const graph = await client.historical.expandGraph({
+    graphSnapshotId: first.entry.graphSnapshotId,
+    seedIds: first.entry.seedIds,
+    edgeFamilies: ['recorded_reference'],
+    limitNodes: 120,
+    limitEdges: 240,
+  });
+  const source = await client.historical.getPassage({
+    graphSnapshotId: graph.graphSnapshotId,
+    passageVersionId: first.node.id,
+  });
+  console.log(source.passage.locatorLabel, source.passage.text);
+  console.log(graph.page.truncated, graph.page.nextCursor);
+}
+```
+
+Choose query text appropriate to the indexed source language. Use IDs from
+actual results rather than constructing them from titles or Bible references.
+Detail and expansion calls require the returned snapshot ID. A retired
+snapshot, unavailable semantic layer, invalid response, or failed tool is an
+error, not an empty successful graph.
+
+`getRelation({ graphSnapshotId, relationId })` returns either the recorded
+assertion evidence or the separately typed semantic-neighbor metadata.
+Semantic cosine scores are not historical confidence or proof of influence.
+
+Browser-safe schemas, inferred types and an injectable client are exported
+without loading the SDK authentication/CLI entry point:
+
+```ts
+import {
+  HistoricalClient,
+  HistoricalGraphResponseSchema,
+  parseHistorical,
+} from '@nuberea/sdk/historical';
+```
+
+The client validates MCP `structuredContent`; it does not parse a human
+summary as JSON. `HistoricalContractError` identifies invalid or inconsistent
+payloads, and `HistoricalToolError` identifies a tool failure.
+`parseHistoricalOperation` is the shared shape-and-identity validator used
+by SDK and application adapters. It checks snapshot/root membership,
+search evidence identity and semantic-edge consistency in addition to
+the JSON shape.
+
+### Shared-contract workspace development
+
+The canonical source is [contracts.ts](src/historical/contracts.ts).
+Until a new SDK version is published, sibling application repositories use
+deterministically generated copies rather than an unpublished package
+dependency. Their independent builds require only the public TypeBox package.
+
+From this SDK source checkout:
+
+```bash
+npm run generate:historical-contracts
+npm run check:historical-contracts
+npm run verify:historical-workspace
+```
+
+Generated files carry the canonical source hash and must not be edited.
+The generator also emits a native ESM contract module for the Research
+child runtime, retaining TypeBox validation rather than relying on a
+reduced JSON-schema interpreter. Regenerate after a contract change and
+validate the SDK, MCP, chat and web consumers together.
+
+The workspace verification command requires the MCP and web source checkouts
+beside this SDK, their dependencies installed, and Node 26. It creates a
+temporary, explicitly synthetic publication and exercises the real web API
+client and SDK client through the actual local HTTP/MCP adapters and DuckDB.
+Only authentication/entitlement inputs are mocked. It uses no cloud accounts,
+hosted models, private data, or production configuration, and closes its
+listeners/readers and removes its temporary publication afterward.
+
 ## Data connectors (BYO-data)
 
 Register your own data so it becomes queryable through the NuBerea MCP server.

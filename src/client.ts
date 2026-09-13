@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import { HistoricalClient } from './historical/client.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -53,6 +54,7 @@ export class NuBerea {
   private useSession: boolean;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
+  private historicalClient: HistoricalClient | null = null;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
@@ -65,6 +67,13 @@ export class NuBerea {
       mcpUrl: this.mcpUrl,
       ...config?.auth,
     });
+  }
+
+  get historical(): HistoricalClient {
+    if (!this.historicalClient) {
+      this.historicalClient = new HistoricalClient((name, args) => this.tool(name, args));
+    }
+    return this.historicalClient;
   }
 
   // ==========================================================================
