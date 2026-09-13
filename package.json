@@ -13,6 +13,10 @@
     "./cli": {
       "import": "./dist/cli/index.js",
       "types": "./dist/cli/index.d.ts"
+    },
+    "./historical": {
+      "import": "./dist/historical/index.js",
+      "types": "./dist/historical/index.d.ts"
     }
   },
   "bin": {
@@ -29,6 +33,9 @@
     "lint": "eslint src/",
     "test": "vitest run",
     "test:watch": "vitest",
+    "generate:historical-contracts": "node scripts/export-historical-contracts.mjs",
+    "check:historical-contracts": "node scripts/export-historical-contracts.mjs --check",
+    "verify:historical-workspace": "npm run build && npm run check:historical-contracts && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/verify-historical-workspace.cjs",
     "prepublishOnly": "npm run build",
     "cli": "tsx src/cli/index.ts"
   },

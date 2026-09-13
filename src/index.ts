@@ -28,6 +28,7 @@
 
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
+export { HistoricalClient, HistoricalToolError } from './historical/client.js';
 export { NuBereaAuth } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
