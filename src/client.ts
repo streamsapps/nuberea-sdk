@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import { BillingClient, type SubscriptionBillingCycle, type SubscriptionCheckout } from './billing.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -31,6 +32,8 @@ export interface NuBereaConfig {
   baseUrl?: string;
   /** Override: MCP endpoint URL */
   mcpUrl?: string;
+  /** Override: subscription billing API base URL */
+  billingBaseUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
   /** Use MCP session mode (initialize + session tracking) vs stateless */
@@ -44,6 +47,7 @@ export type NuBereaTokens = {
 };
 
 const DEFAULT_BASE = 'https://auth.aws-dev.streamsappsgslbex.com';
+const DEFAULT_BILLING_BASE = 'https://api.aws-dev.streamsappsgslbex.com/mcp-dev';
 
 export class NuBerea {
   private auth: NuBereaAuth;
@@ -53,6 +57,7 @@ export class NuBerea {
   private useSession: boolean;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
+  private billingClient: BillingClient;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
@@ -64,6 +69,10 @@ export class NuBerea {
       oauthBaseUrl: this.baseUrl,
       mcpUrl: this.mcpUrl,
       ...config?.auth,
+    });
+    this.billingClient = new BillingClient({
+      baseUrl: config?.billingBaseUrl ?? DEFAULT_BILLING_BASE,
+      getToken: () => this.getToken(),
     });
   }
 
@@ -106,6 +115,17 @@ export class NuBerea {
   async logout(): Promise<void> {
     this.staticToken = undefined;
     await this.auth.logout();
+  }
+
+  /**
+   * Create a Stripe-hosted Checkout session for NuBerea Plus.
+   * Payment details are entered only on Stripe; the SDK never receives them.
+   */
+  async createSubscriptionCheckout(
+    billingCycle: SubscriptionBillingCycle,
+    options?: { checkoutAttemptId?: string },
+  ): Promise<SubscriptionCheckout> {
+    return this.billingClient.createSubscriptionCheckout(billingCycle, options);
   }
 
   private async getToken(): Promise<string> {

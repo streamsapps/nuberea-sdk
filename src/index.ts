@@ -28,6 +28,12 @@
 
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
+export { BillingClient } from './billing.js';
+export type {
+  BillingClientConfig,
+  SubscriptionBillingCycle,
+  SubscriptionCheckout,
+} from './billing.js';
 export { NuBereaAuth } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';

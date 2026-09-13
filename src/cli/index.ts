@@ -20,6 +20,8 @@
  */
 
 import { NuBerea } from '../client.js';
+import { openBrowser } from '../browser.js';
+import type { SubscriptionBillingCycle } from '../billing.js';
 
 // ============================================================================
 // Helpers
@@ -33,6 +35,12 @@ function usage(): void {
     login                    Sign in (opens browser)
     logout                   Clear stored credentials
     status                   Check authentication status
+
+  SUBSCRIPTION
+    subscribe <monthly|yearly>
+                             Open Stripe-hosted Checkout for NuBerea Plus
+    subscribe <cycle> --no-open --json
+                             Return a Checkout URL for an agent to present
 
   MCP TOOLS
     tools                    List all available tools
@@ -79,10 +87,12 @@ function usage(): void {
     catalog hf-identity-verify <tenantId>
                                          Prove the HF token exchange works
     --base-url <url>         Override API base URL
+    --billing-base-url <url> Override subscription API base URL
     --token <token>          Use pre-set access token
 
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
+    NUBEREA_BILLING_BASE_URL Subscription API base URL
     NUBEREA_ACCESS_TOKEN     Pre-set access token (for CI/automation — use short-lived tokens only)
 `);
 }
@@ -135,6 +145,7 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
   return new NuBerea({
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
+    billingBaseUrl: (flags['billing-base-url'] as string) ?? process.env.NUBEREA_BILLING_BASE_URL,
     useSession: !!flags.session,
   });
 }
@@ -160,6 +171,30 @@ async function cmdStatus(client: NuBerea): Promise<void> {
     console.log('✅ Authenticated');
   } else {
     console.log('❌ Not authenticated. Run: nuberea login');
+  }
+}
+
+async function cmdSubscribe(
+  client: NuBerea,
+  args: string[],
+  flags: Record<string, string | boolean>,
+  raw: boolean,
+): Promise<void> {
+  const billingCycle = args[0] as SubscriptionBillingCycle | undefined;
+  if (billingCycle !== 'monthly' && billingCycle !== 'yearly') {
+    die('Usage: nuberea subscribe <monthly|yearly> [--no-open] [--json]');
+  }
+
+  const checkout = await client.createSubscriptionCheckout(billingCycle);
+  if (raw) {
+    console.log(formatJson(checkout, true));
+  } else {
+    console.log(`Stripe Checkout: ${checkout.url}`);
+  }
+
+  if (!raw && !flags['no-open']) {
+    openBrowser(checkout.url);
+    console.log('Opened Stripe Checkout in your browser.');
   }
 }
 
@@ -642,7 +677,7 @@ async function main(): Promise<void> {
 
   // All other commands need auth — ensure we have it
   if (!flags.token && !process.env.NUBEREA_ACCESS_TOKEN && !await client.checkAuth()) {
-    console.log('Not authenticated. Signing in...\n');
+    if (!raw) console.log('Not authenticated. Signing in...\n');
     await client.login();
   }
 
@@ -674,6 +709,8 @@ async function main(): Promise<void> {
       return cmdGreek(client, args, raw);
     case 'hebrew':
       return cmdHebrew(client, args, raw);
+    case 'subscribe':
+      return cmdSubscribe(client, args, flags, raw);
     case 'catalog':
       return cmdCatalog(client, args, flags, raw);
     default:
