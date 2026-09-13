@@ -196,6 +196,12 @@ export const HistoricalAssertionEvidenceSchema = Type.Object({
 });
 export type HistoricalAssertionEvidence = Static<typeof HistoricalAssertionEvidenceSchema>;
 
+export const HistoricalRelationEvidenceSchema = Type.Object({
+  ...HistoricalAssertionEvidenceSchema.properties,
+  assertionId: Id,
+});
+export type HistoricalRelationEvidence = Static<typeof HistoricalRelationEvidenceSchema>;
+
 export const HistoricalCatalogRequestSchema = Type.Object({}, RequestOptions);
 export const HistoricalSnapshotDescriptorSchema = Type.Object({
   graphSnapshotId: Id,
@@ -252,7 +258,7 @@ export const HistoricalSearchResponseSchema = Type.Object({
     method: HistoricalSearchMethodSchema,
     rank: Type.Integer({ minimum: 1 }),
     entry: HistoricalNetworkEntrySchema,
-  })),
+  }), { maxItems: HISTORICAL_LIMITS.maxSearchResults }),
   page: HistoricalPageSchema,
 });
 export type HistoricalSearchResponse = Static<typeof HistoricalSearchResponseSchema>;
@@ -308,7 +314,7 @@ export const HistoricalRelationResponseSchema = Type.Object({
   apiVersion: ApiVersion,
   graphSnapshotId: Id,
   edge: HistoricalEdgeSchema,
-  evidence: Type.Array(HistoricalAssertionEvidenceSchema),
+  evidence: Type.Array(HistoricalRelationEvidenceSchema),
 });
 export type HistoricalRelationResponse = Static<typeof HistoricalRelationResponseSchema>;
 
@@ -359,6 +365,13 @@ export function parseHistoricalOperation<T extends HistoricalToolName>(
 ): HistoricalOperationResponse<T> {
   const schema: (typeof HISTORICAL_TOOL_SCHEMAS)[T]['output'] = HISTORICAL_TOOL_SCHEMAS[name].output;
   const result = parseHistorical(schema, payload, name);
+
+  if ((name === 'historical_search' || name === 'historical_graph_expand') && 'page' in result) {
+    const limited = result.page.reasons.some(reason => reason !== 'neighbor_policy');
+    if (result.page.truncated !== limited || (!limited && result.page.nextCursor !== null)) {
+      throw new HistoricalContractError('page continuation');
+    }
+  }
 
   if (name === 'historical_catalog' && Value.Check(HistoricalCatalogResponseSchema, result)) {
     const ids = new Set(result.snapshots.map(snapshot => snapshot.graphSnapshotId));
@@ -435,6 +448,17 @@ export function parseHistoricalOperation<T extends HistoricalToolName>(
     requireMatchingSnapshot(request, result.graphSnapshotId);
     if (request?.relationId !== undefined && request.relationId !== result.edge.id) {
       throw new HistoricalContractError('relation identity');
+    }
+    if (result.edge.kind === 'recorded_reference') {
+      const assertionIds = new Set(result.edge.assertionIds);
+      const represented = new Set(result.evidence.map(evidence => evidence.assertionId));
+      if (new Set(result.evidence.map(evidence => evidence.id)).size !== result.evidence.length ||
+          represented.size !== assertionIds.size ||
+          result.evidence.some(evidence => !assertionIds.has(evidence.assertionId))) {
+        throw new HistoricalContractError('relation evidence identity');
+      }
+    } else if (result.evidence.length !== 0) {
+      throw new HistoricalContractError('semantic relation evidence');
     }
   }
 

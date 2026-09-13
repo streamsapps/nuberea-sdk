@@ -13,6 +13,7 @@ import {
   parseHistoricalOperation,
   type HistoricalGraphResponse,
   type HistoricalPassage,
+  type HistoricalRelationResponse,
   type HistoricalSearchResponse,
 } from './contracts.js';
 import { HistoricalClient, HistoricalToolError, type HistoricalToolCaller } from './client.js';
@@ -80,6 +81,21 @@ function transport(payload: Record<string, unknown>, isError = false) {
     structuredContent: payload,
     isError,
   }));
+}
+
+function relation(): HistoricalRelationResponse {
+  return {
+    apiVersion: 1, graphSnapshotId: 'snapshot1',
+    edge: {
+      kind: 'recorded_reference', id: 'e1', from: 'p1', to: 'r1',
+      predicate: 'editorial_reference', assertionIds: ['a1'],
+    },
+    evidence: [{
+      id: 'source-evidence1', assertionId: 'a1', corpusId: 'pta', sourceReleaseId: 'source1',
+      sourceAnnotationId: 'annotation1', origin: 'publisher_annotation', locatorLabel: 'note 1',
+      sourceUri: null, excerpt: 'Source reference', reviewStatus: 'publisher_recorded',
+    }],
+  };
 }
 
 describe('historical contracts', () => {
@@ -191,6 +207,88 @@ describe('shared operation integrity', () => {
   it('accepts a valid native TypeBox union and preserves uncalibrated cosine', () => {
     const data = semanticGraph();
     expect(parseHistoricalOperation('historical_graph_expand', data)).toEqual(data);
+  });
+
+  it.each([
+    { label: 'complete page', page, valid: true },
+    { label: 'complete stored neighborhood', page: { nextCursor: null, truncated: false, reasons: ['neighbor_policy'] }, valid: true },
+    { label: 'limited semantic page', page: { nextCursor: 'next', truncated: true, reasons: ['edge_limit', 'neighbor_policy'] }, valid: true },
+    { label: 'policy alone marked truncated', page: { nextCursor: null, truncated: true, reasons: ['neighbor_policy'] }, valid: false },
+    { label: 'cursor on complete page', page: { nextCursor: 'next', truncated: false, reasons: ['neighbor_policy'] }, valid: false },
+    { label: 'limit marked complete', page: { nextCursor: null, truncated: false, reasons: ['node_limit'] }, valid: false },
+    { label: 'truncated without a limit', page: { nextCursor: null, truncated: true, reasons: [] }, valid: false },
+  ])('distinguishes policy metadata from truncation: $label', ({ page: responsePage, valid }) => {
+    const data = { ...semanticGraph(), page: responsePage };
+    const decode = () => parseHistoricalOperation('historical_graph_expand', data);
+    if (valid) expect(decode()).toEqual(data);
+    else expect(decode).toThrow(HistoricalContractError);
+  });
+
+  it.each([HISTORICAL_LIMITS.maxSearchResults, HISTORICAL_LIMITS.maxSearchResults + 1])(
+    'enforces the canonical output bound for %i unique search hits', count => {
+      const node = graph().nodes[0];
+      if (node.kind !== 'passage') throw new Error('invalid test fixture');
+      const data: HistoricalSearchResponse = {
+        apiVersion: 1, graphSnapshotId: 'snapshot1', resolutionStatus: 'resolved', resolvedSeedIds: [],
+        hits: Array.from({ length: count }, (_, index) => {
+          const id = `result-${index}`;
+          return {
+            node: { ...node, id }, method: 'lexical', rank: index + 1,
+            entry: { graphSnapshotId: 'snapshot1', seedIds: [id], selectedPassageVersionId: id },
+          };
+        }), page,
+      };
+      const decode = () => parseHistoricalOperation('historical_search', data);
+      const checkSchema = () => parseHistorical(HISTORICAL_TOOL_SCHEMAS.historical_search.output, data);
+      if (count <= HISTORICAL_LIMITS.maxSearchResults) {
+        expect(decode()).toEqual(data);
+        expect(checkSchema()).toEqual(data);
+      } else {
+        expect(decode).toThrow(HistoricalContractError);
+        expect(checkSchema).toThrow(HistoricalContractError);
+      }
+    },
+  );
+
+  it('binds distinct source evidence IDs to every recorded assertion without depending on order', () => {
+    const data = relation();
+    if (data.edge.kind !== 'recorded_reference') throw new Error('invalid test fixture');
+    data.edge.assertionIds = ['a2', 'a1'];
+    data.evidence.push(
+      { ...data.evidence[0], id: 'source-evidence2', assertionId: 'a2' },
+      { ...data.evidence[0], id: 'source-evidence3' },
+    );
+    expect(parseHistoricalOperation('historical_get_relation', data)).toEqual(data);
+  });
+
+  it.each(['unrelated', 'missing', 'duplicate', 'empty'])(
+    'rejects %s recorded relation evidence', problem => {
+      const data = relation();
+      if (data.edge.kind !== 'recorded_reference') throw new Error('invalid test fixture');
+      if (problem === 'unrelated') data.evidence[0].assertionId = 'other-assertion';
+      if (problem === 'missing') data.edge.assertionIds.push('unrepresented-assertion');
+      if (problem === 'duplicate') data.evidence.push({ ...data.evidence[0] });
+      if (problem === 'empty') data.evidence = [];
+      expect(() => parseHistoricalOperation('historical_get_relation', data)).toThrow(HistoricalContractError);
+    },
+  );
+
+  it('rejects evidence without an explicit assertion association', () => {
+    const data = relation();
+    expect(() => parseHistoricalOperation('historical_get_relation', {
+      ...data, evidence: [{ ...data.evidence[0], assertionId: undefined }],
+    })).toThrow(HistoricalContractError);
+  });
+
+  it('accepts semantic build metadata but never editorial evidence on a semantic relation', () => {
+    const data = {
+      ...relation(), edge: semanticGraph().edges[0], evidence: [],
+      semanticBuild: { buildId: 'build1' },
+    };
+    expect(parseHistoricalOperation('historical_get_relation', data)).toEqual(data);
+    expect(() => parseHistoricalOperation('historical_get_relation', {
+      ...data, evidence: relation().evidence,
+    })).toThrow(HistoricalContractError);
   });
 
   it.each(['wrong-space', 'duplicate-edge', 'self-edge', 'anchor-edge', 'inconsistent-mutual', 'cosine-90'])(
@@ -353,7 +451,7 @@ describe('HistoricalClient', () => {
   });
 
   it('validates relation identity', async () => {
-    const data = { apiVersion: 1, graphSnapshotId: 'snapshot1', edge: graph().edges[0], evidence: [] };
+    const data = relation();
     const client = new HistoricalClient(transport(data));
     await expect(client.getRelation({
       graphSnapshotId: 'snapshot1', relationId: 'e1',

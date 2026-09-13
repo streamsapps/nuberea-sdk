@@ -119,7 +119,14 @@ error, not an empty successful graph.
 
 `getRelation({ graphSnapshotId, relationId })` returns either the recorded
 assertion evidence or the separately typed semantic-neighbor metadata.
+Recorded evidence has its own `id` and an explicit `assertionId` association;
+the client requires complete assertion coverage and rejects unrelated or
+duplicate evidence. Semantic relations have no editorial evidence.
 Semantic cosine scores are not historical confidence or proof of influence.
+
+Search responses contain at most 50 hits. A `neighbor_policy` page reason
+describes the precomputed candidate subset, not pagination truncation.
+Only node, edge or byte limits make `page.truncated` true.
 
 Browser-safe schemas, inferred types and an injectable client are exported
 without loading the SDK authentication/CLI entry point:
