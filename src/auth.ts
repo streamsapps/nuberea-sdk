@@ -54,8 +54,7 @@ export function resolveMcpUrl(oauthBaseUrl: string): string {
   try {
     const { hostname } = new URL(baseUrl);
     if (
-      hostname === 'auth.aws-dev.streamsappsgslbex.com'
-      || hostname === 'auth.nubereappe.com'
+      hostname === 'auth.nubereappe.com'
       || hostname === 'api.nubereappe.com'
     ) {
       return MCP_ENDPOINTS.preproduction;
@@ -71,7 +70,7 @@ export function resolveMcpUrl(oauthBaseUrl: string): string {
 }
 
 const DEFAULT_CONFIG: AuthConfig = {
-  oauthBaseUrl: 'https://auth.aws-dev.streamsappsgslbex.com',
+  oauthBaseUrl: 'https://auth.nubereappe.com',
   mcpUrl: MCP_ENDPOINTS.preproduction,
   clientId: 'mcp-client-test',
   callbackPort: 9876,

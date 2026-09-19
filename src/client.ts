@@ -43,7 +43,7 @@ export type NuBereaTokens = {
   expiresAt: number;
 };
 
-const DEFAULT_BASE = 'https://auth.aws-dev.streamsappsgslbex.com';
+const DEFAULT_BASE = 'https://auth.nubereappe.com';
 
 export class NuBerea {
   private auth: NuBereaAuth;

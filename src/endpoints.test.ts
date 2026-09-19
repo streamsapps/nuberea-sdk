@@ -4,7 +4,6 @@ import { NuBerea } from './client.js';
 
 describe('MCP endpoint resolution', () => {
   it.each([
-    ['https://auth.aws-dev.streamsappsgslbex.com', MCP_ENDPOINTS.preproduction],
     ['https://auth.nubereappe.com', MCP_ENDPOINTS.preproduction],
     ['https://api.nubereappe.com', MCP_ENDPOINTS.preproduction],
     ['https://auth.nuberea.com', MCP_ENDPOINTS.production],
