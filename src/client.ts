@@ -5,7 +5,7 @@
  * into a single, ergonomic interface.
  */
 
-import { NuBereaAuth, type AuthConfig } from './auth.js';
+import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
 import {
   McpClient,
@@ -56,7 +56,7 @@ export class NuBerea {
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
-    this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? `${this.baseUrl}/mcp`;
+    this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? resolveMcpUrl(this.baseUrl);
     this.staticToken = config?.accessToken;
     this.useSession = config?.useSession ?? false;
 
@@ -245,7 +245,8 @@ export class NuBerea {
       // Not signed in — fall back to the anonymous (built-ins only) response.
     }
 
-    const res = await fetch(`${this.baseUrl}/tools`, { headers });
+    const toolsUrl = new URL('/tools', this.mcpUrl).toString();
+    const res = await fetch(toolsUrl, { headers });
     if (!res.ok) throw new Error(`Failed to list tools: HTTP ${res.status}`);
     const data = (await res.json()) as { tools: ToolInfo[] };
     return data.tools;

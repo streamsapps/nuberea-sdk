@@ -79,10 +79,12 @@ function usage(): void {
     catalog hf-identity-verify <tenantId>
                                          Prove the HF token exchange works
     --base-url <url>         Override API base URL
+    --mcp-url <url>          Override MCP transport URL
     --token <token>          Use pre-set access token
 
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
+    NUBEREA_MCP_URL          MCP transport URL
     NUBEREA_ACCESS_TOKEN     Pre-set access token (for CI/automation — use short-lived tokens only)
 `);
 }
@@ -134,6 +136,7 @@ function formatJson(data: unknown, raw: boolean): string {
 function createClient(flags: Record<string, string | boolean>): NuBerea {
   return new NuBerea({
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
+    mcpUrl: (flags['mcp-url'] as string) ?? process.env.NUBEREA_MCP_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
     useSession: !!flags.session,
   });

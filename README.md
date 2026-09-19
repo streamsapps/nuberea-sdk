@@ -238,7 +238,8 @@ Run `nuberea tools` to see the full list.
 
 | Variable | Description |
 |---|---|
-| `NUBEREA_BASE_URL` | API base URL (default: `https://auth.aws-dev.streamsappsgslbex.com`) |
+| `NUBEREA_BASE_URL` | OAuth/control-plane base URL (default: `https://auth.aws-dev.streamsappsgslbex.com`) |
+| `NUBEREA_MCP_URL` | MCP transport URL (dev/preproduction: `https://mcp.nubereappe.com/mcp`; production: `https://mcp.nuberea.com/mcp`) |
 | `NUBEREA_ACCESS_TOKEN` | Pre-set access token (skip login) |
 | `NUBEREA_FIREBASE_TOKEN` | Pre-set Firebase token (skip browser sign-in) |
 
@@ -247,9 +248,16 @@ Run `nuberea tools` to see the full list.
 ```ts
 const client = new NuBerea({
   baseUrl: 'https://auth.aws-dev.streamsappsgslbex.com',
+  mcpUrl: 'https://mcp.nubereappe.com/mcp',
   accessToken: 'your-token', // Skip login
 });
 ```
+
+For production, use `mcpUrl: 'https://mcp.nuberea.com/mcp'`. The SDK
+automatically selects the branded MCP endpoint for known NuBerea
+OAuth/control-plane hosts. OAuth authorization, token, issuer, and discovery
+requests continue to use `baseUrl`; only MCP protocol and tool-list requests
+use `mcpUrl`.
 
 ## Authentication
 

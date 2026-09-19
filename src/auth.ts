@@ -38,9 +38,41 @@ export interface AuthConfig {
 /** Tokens kept in memory and persisted to keychain/file (no login credentials). */
 export type StoredTokens = PersistedTokens;
 
+export const MCP_ENDPOINTS = {
+  development: 'https://mcp.nubereappe.com/mcp',
+  preproduction: 'https://mcp.nubereappe.com/mcp',
+  production: 'https://mcp.nuberea.com/mcp',
+} as const;
+
+/**
+ * Resolve the MCP transport independently from the OAuth/control-plane host.
+ * Unknown hosts retain the legacy same-origin behavior for self-hosted setups.
+ */
+export function resolveMcpUrl(oauthBaseUrl: string): string {
+  const baseUrl = oauthBaseUrl.replace(/\/+$/, '');
+
+  try {
+    const { hostname } = new URL(baseUrl);
+    if (
+      hostname === 'auth.aws-dev.streamsappsgslbex.com'
+      || hostname === 'auth.nubereappe.com'
+      || hostname === 'api.nubereappe.com'
+    ) {
+      return MCP_ENDPOINTS.preproduction;
+    }
+    if (hostname === 'auth.nuberea.com' || hostname === 'api.nuberea.com') {
+      return MCP_ENDPOINTS.production;
+    }
+  } catch {
+    // Preserve the previous same-origin fallback for non-standard base URLs.
+  }
+
+  return `${baseUrl}/mcp`;
+}
+
 const DEFAULT_CONFIG: AuthConfig = {
   oauthBaseUrl: 'https://auth.aws-dev.streamsappsgslbex.com',
-  mcpUrl: 'https://auth.aws-dev.streamsappsgslbex.com/mcp',
+  mcpUrl: MCP_ENDPOINTS.preproduction,
   clientId: 'mcp-client-test',
   callbackPort: 9876,
   firebaseAuthPort: 9875,
@@ -53,7 +85,13 @@ export class NuBereaAuth {
   private tokens: StoredTokens | null = null;
 
   constructor(config?: Partial<AuthConfig>) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
+    const oauthBaseUrl = config?.oauthBaseUrl ?? DEFAULT_CONFIG.oauthBaseUrl;
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...config,
+      oauthBaseUrl,
+      mcpUrl: config?.mcpUrl ?? resolveMcpUrl(oauthBaseUrl),
+    };
   }
 
   // ==========================================================================
