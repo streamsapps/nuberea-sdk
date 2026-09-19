@@ -211,7 +211,6 @@ nuberea catalog tools <tenantId>
 | `abbott_smith` | `entries` | Abbott-Smith NT Greek Lexicon | 555 |
 | `kjv` | `verses` | King James Version Bible text | 36,821 |
 | `cntr` | `transcriptions` | Greek NT manuscript transcriptions | 41,956 |
-| `dss` | `scrolls` | Dead Sea Scrolls annotations | 500,991 |
 | `aland` | `pericopes` | Synoptic parallel pericopes | 330 |
 
 ## Available MCP Tools
@@ -225,7 +224,6 @@ nuberea catalog tools <tenantId>
 - **`lexicon_lsj_*`** — LSJ Greek lexicon (lookup, search, search_latin, ...)
 - **`lexicon_bdb_*`** — BDB Hebrew lexicon
 - **`lexicon_abbott_smith_*`** — Abbott-Smith lexicon
-- **`scroll_dss_*`** — Dead Sea Scrolls
 - **`transcription_cntr_*`** — CNTR manuscripts
 - **`synoptic_*`** — Synoptic parallels
 - **`analytics_*`** — SQL queries, schema introspection
@@ -238,8 +236,8 @@ Run `nuberea tools` to see the full list.
 
 | Variable | Description |
 |---|---|
-| `NUBEREA_BASE_URL` | OAuth/control-plane base URL (default: `https://auth.nubereappe.com`) |
-| `NUBEREA_MCP_URL` | MCP transport URL (dev/preproduction: `https://mcp.nubereappe.com/mcp`; production: `https://mcp.nuberea.com/mcp`) |
+| `NUBEREA_BASE_URL` | OAuth/control-plane base URL (default: `https://auth.nuberea.com`) |
+| `NUBEREA_MCP_URL` | MCP transport URL (default: `https://mcp.nuberea.com/mcp`) |
 | `NUBEREA_ACCESS_TOKEN` | Pre-set access token (skip login) |
 | `NUBEREA_FIREBASE_TOKEN` | Pre-set Firebase token (skip browser sign-in) |
 
@@ -247,18 +245,17 @@ Run `nuberea tools` to see the full list.
 
 ```ts
 const client = new NuBerea({
-  baseUrl: 'https://auth.nubereappe.com',
-  mcpUrl: 'https://mcp.nubereappe.com/mcp',
+  baseUrl: 'https://auth.nuberea.com',
+  mcpUrl: 'https://mcp.nuberea.com/mcp',
   accessToken: 'your-token', // Skip login
 });
 ```
 
-For production, use `baseUrl: 'https://auth.nuberea.com'` with
-`mcpUrl: 'https://mcp.nuberea.com/mcp'`. The SDK
-automatically selects the branded MCP endpoint for known NuBerea
+The SDK automatically selects the branded MCP endpoint for known NuBerea
 OAuth/control-plane hosts. OAuth authorization, token, issuer, and discovery
 requests continue to use `baseUrl`; only MCP protocol and tool-list requests
-use `mcpUrl`.
+use `mcpUrl`. Development and preproduction callers can override both URLs
+explicitly.
 
 ## Authentication
 
