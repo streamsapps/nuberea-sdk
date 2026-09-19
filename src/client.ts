@@ -52,8 +52,16 @@ export class NuBerea {
   private catalogClient: CatalogClient | null = null;
 
   constructor(config?: NuBereaConfig) {
-    this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
-    this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? resolveMcpUrl(this.baseUrl);
+    this.baseUrl =
+      config?.baseUrl
+      ?? config?.auth?.oauthBaseUrl
+      ?? process.env.NUBEREA_BASE_URL
+      ?? DEFAULT_BASE;
+    this.mcpUrl =
+      config?.mcpUrl
+      ?? config?.auth?.mcpUrl
+      ?? process.env.NUBEREA_MCP_URL
+      ?? resolveMcpUrl(this.baseUrl);
     this.staticToken = config?.accessToken;
 
     this.auth = new NuBereaAuth({
@@ -121,7 +129,7 @@ export class NuBerea {
   get catalog(): CatalogClient {
     if (!this.catalogClient) {
       this.catalogClient = new CatalogClient({
-        baseUrl: this.baseUrl,
+        baseUrl: new URL(this.mcpUrl).origin,
         getToken: () => this.getToken(),
       });
     }

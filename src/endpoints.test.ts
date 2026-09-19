@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MCP_ENDPOINTS, resolveMcpUrl } from './auth.js';
 import { NuBerea } from './client.js';
+import { defaultTokenFile, tokenStoreAccount } from './storage.js';
 
 describe('MCP endpoint resolution', () => {
   it.each([
@@ -12,11 +13,20 @@ describe('MCP endpoint resolution', () => {
   ])('maps %s to %s', (oauthBaseUrl, expected) => {
     expect(resolveMcpUrl(oauthBaseUrl)).toBe(expected);
   });
+
+  it('isolates persisted credentials by OAuth host', () => {
+    expect(defaultTokenFile('https://auth.nuberea.com')).not.toBe(
+      defaultTokenFile('https://auth.nubereappe.com'),
+    );
+    expect(tokenStoreAccount('https://auth.nuberea.com')).toBe('tokens:auth.nuberea.com');
+    expect(tokenStoreAccount('https://auth.nubereappe.com')).toBe('tokens:auth.nubereappe.com');
+  });
 });
 
 describe('NuBerea MCP requests', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
   });
 
   it('sends MCP tool calls to the production MCP host by default', async () => {
@@ -84,6 +94,62 @@ describe('NuBerea MCP requests', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       'https://mcp.nuberea.com/tools',
       expect.any(Object),
+    );
+  });
+
+  it('sends catalog requests to the MCP host', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ tenants: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NuBerea({ accessToken: 'token' });
+    await client.catalog.listTenants();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://mcp.nuberea.com/v1/tenants',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('honors environment URL overrides for programmatic clients', async () => {
+    vi.stubEnv('NUBEREA_BASE_URL', 'https://auth.nubereappe.com');
+    vi.stubEnv('NUBEREA_MCP_URL', 'https://mcp.nubereappe.com/mcp');
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ tenants: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NuBerea({ accessToken: 'token' });
+    await client.catalog.listTenants();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://mcp.nubereappe.com/v1/tenants',
+      expect.objectContaining({ method: 'GET' }),
+    );
+  });
+
+  it('surfaces catalog error details from the server', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        code: 'ACCOUNT_ACCESS_DENIED',
+        message: 'The account cannot access this tenant.',
+      }), {
+        status: 403,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    ));
+
+    const client = new NuBerea({ accessToken: 'token' });
+
+    await expect(client.catalog.listTenants()).rejects.toThrow(
+      'GET /v1/tenants failed (HTTP 403): ACCOUNT_ACCESS_DENIED: The account cannot access this tenant.',
     );
   });
 });

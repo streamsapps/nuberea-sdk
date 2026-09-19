@@ -236,7 +236,7 @@ Run `nuberea tools` to see the full list.
 
 | Variable | Description |
 |---|---|
-| `NUBEREA_BASE_URL` | OAuth/control-plane base URL (default: `https://auth.nuberea.com`) |
+| `NUBEREA_BASE_URL` | OAuth base URL (default: `https://auth.nuberea.com`) |
 | `NUBEREA_MCP_URL` | MCP transport URL (default: `https://mcp.nuberea.com/mcp`) |
 | `NUBEREA_ACCESS_TOKEN` | Pre-set access token (skip login) |
 | `NUBEREA_FIREBASE_TOKEN` | Pre-set Firebase token (skip browser sign-in) |
@@ -263,8 +263,14 @@ NuBerea uses OAuth 2.1 with PKCE.
 
 1. `nuberea login` opens your browser to `nuberea.com/login`
 2. Sign in to your nuberea account
-3. Tokens are stored at `~/.nuberea/tokens.json` (mode 0600)
+3. Tokens are stored per OAuth host in the OS keychain when available, otherwise
+   under the platform state directory (for example,
+   `~/Library/Application Support/nuberea/tokens-auth.nuberea.com.json` on macOS)
 4. Tokens auto-refresh — you rarely need to re-login
+
+Install `@nuberea/sdk` in the consuming project or reference it through an npm
+workspace/file dependency. Node.js ESM does not use `NODE_PATH` to resolve
+packages from sibling directories.
 
 ## License
 
