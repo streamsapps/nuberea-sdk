@@ -3,8 +3,7 @@
  *
  * Implements MCP Streamable HTTP transport:
  *   - POST /mcp: JSON-RPC requests (initialize, tools/list, tools/call, resources/list, resources/read)
- *   - Session tracking via mcp-session-id header
- *   - Stateless mode (no session) and session-based mode
+ *   - Stateless requests authenticated independently with an OAuth bearer token
  *
  * Can be used standalone or through the higher-level NuBerea client class.
  */
@@ -68,8 +67,6 @@ export interface McpClientConfig {
   accessToken: string;
   /** MCP protocol version (default: "2025-03-26") */
   protocolVersion?: string;
-  /** Use session-based mode (sends initialize, tracks session ID) */
-  useSession?: boolean;
 }
 
 // ============================================================================
@@ -80,18 +77,15 @@ export class McpClient {
   private mcpUrl: string;
   private accessToken: string;
   private protocolVersion: string;
-  private sessionId: string | null = null;
   private initialized = false;
   private serverInfo: McpServerInfo | null = null;
   private capabilities: McpCapabilities | null = null;
-  private useSession: boolean;
   private requestId = 0;
 
   constructor(config: McpClientConfig) {
     this.mcpUrl = config.mcpUrl;
     this.accessToken = config.accessToken;
     this.protocolVersion = config.protocolVersion ?? '2025-03-26';
-    this.useSession = config.useSession ?? false;
   }
 
   // ==========================================================================
@@ -111,10 +105,6 @@ export class McpClient {
       Authorization: `Bearer ${this.accessToken}`,
     };
 
-    if (this.sessionId) {
-      headers['mcp-session-id'] = this.sessionId;
-    }
-
     const body: McpJsonRpcRequest = {
       jsonrpc: '2.0',
       method,
@@ -133,12 +123,6 @@ export class McpClient {
       throw new McpError(`MCP request failed: HTTP ${res.status} — ${text}`, res.status);
     }
 
-    // Capture session ID from response
-    const newSessionId = res.headers.get('mcp-session-id');
-    if (newSessionId) {
-      this.sessionId = newSessionId;
-    }
-
     // Parse response (may be SSE or plain JSON)
     const text = await res.text();
     return this.parseResponse(text, res.headers.get('content-type') ?? '');
@@ -153,10 +137,6 @@ export class McpClient {
       Accept: 'application/json, text/event-stream',
       Authorization: `Bearer ${this.accessToken}`,
     };
-
-    if (this.sessionId) {
-      headers['mcp-session-id'] = this.sessionId;
-    }
 
     const body = {
       jsonrpc: '2.0' as const,
@@ -176,8 +156,7 @@ export class McpClient {
   // ==========================================================================
 
   /**
-   * Initialize the MCP session.
-   * Must be called before other methods in session-based mode.
+   * Perform the optional MCP initialize handshake.
    */
   async initialize(): Promise<McpInitializeResult> {
     const res = await this.request('initialize', {
@@ -208,8 +187,6 @@ export class McpClient {
    * List available tools.
    */
   async listTools(): Promise<ToolInfo[]> {
-    await this.ensureReady();
-
     const res = await this.request('tools/list');
     if (res.error) {
       throw new McpError(`tools/list failed: ${res.error.message}`, res.error.code);
@@ -223,8 +200,6 @@ export class McpClient {
    * Call a tool by name.
    */
   async callTool(name: string, args: Record<string, unknown> = {}): Promise<ToolResult> {
-    await this.ensureReady();
-
     const res = await this.request('tools/call', { name, arguments: args });
     if (res.error) {
       throw new McpError(`tools/call failed: ${res.error.message}`, res.error.code);
@@ -237,8 +212,6 @@ export class McpClient {
    * List available resources.
    */
   async listResources(): Promise<McpResource[]> {
-    await this.ensureReady();
-
     const res = await this.request('resources/list');
     if (res.error) {
       throw new McpError(`resources/list failed: ${res.error.message}`, res.error.code);
@@ -252,8 +225,6 @@ export class McpClient {
    * Read a resource by URI.
    */
   async readResource(uri: string): Promise<McpResourceContent[]> {
-    await this.ensureReady();
-
     const res = await this.request('resources/read', { uri });
     if (res.error) {
       throw new McpError(`resources/read failed: ${res.error.message}`, res.error.code);
@@ -264,32 +235,12 @@ export class McpClient {
   }
 
   /**
-   * Close the MCP session (sends DELETE request).
+   * Reset locally cached initialize metadata.
    */
   async close(): Promise<void> {
-    if (!this.sessionId) return;
-
-    const headers: Record<string, string> = {
-      Authorization: `Bearer ${this.accessToken}`,
-      'mcp-session-id': this.sessionId,
-    };
-
-    try {
-      await fetch(this.mcpUrl, { method: 'DELETE', headers });
-    } catch {
-      // Best-effort cleanup
-    }
-
-    this.sessionId = null;
     this.initialized = false;
-  }
-
-  // ==========================================================================
-  // Accessors
-  // ==========================================================================
-
-  getSessionId(): string | null {
-    return this.sessionId;
+    this.serverInfo = null;
+    this.capabilities = null;
   }
 
   getServerInfo(): McpServerInfo | null {
@@ -309,16 +260,6 @@ export class McpClient {
    */
   setAccessToken(token: string): void {
     this.accessToken = token;
-  }
-
-  // ==========================================================================
-  // Internal
-  // ==========================================================================
-
-  private async ensureReady(): Promise<void> {
-    if (this.useSession && !this.initialized) {
-      await this.initialize();
-    }
   }
 
   private parseResponse(text: string, contentType: string): McpJsonRpcResponse {

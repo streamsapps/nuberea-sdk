@@ -20,7 +20,7 @@ describe('NuBerea MCP requests', () => {
   });
 
   it('sends MCP tool calls to the preproduction MCP host by default', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
+    const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({
         jsonrpc: '2.0',
         id: 1,
@@ -36,6 +36,34 @@ describe('NuBerea MCP requests', () => {
       MCP_ENDPOINTS.preproduction,
       expect.objectContaining({ method: 'POST' }),
     );
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    expect(request.headers).not.toHaveProperty('mcp-session-id');
+  });
+
+  it('does not retain a session ID returned by an MCP server', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () =>
+      new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: { content: [] },
+      }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'mcp-session-id': 'obsolete-session',
+        },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = new NuBerea({ accessToken: 'token' });
+    await client.tool('first');
+    await client.tool('second');
+    await client.close();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
+    expect(secondRequest.headers).not.toHaveProperty('mcp-session-id');
   });
 
   it('loads the stateless tool list from the production MCP host', async () => {

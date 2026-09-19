@@ -33,8 +33,6 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
-  /** Use MCP session mode (initialize + session tracking) vs stateless */
-  useSession?: boolean;
 }
 
 export type NuBereaTokens = {
@@ -50,7 +48,6 @@ export class NuBerea {
   private baseUrl: string;
   private mcpUrl: string;
   private staticToken: string | undefined;
-  private useSession: boolean;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
 
@@ -58,7 +55,6 @@ export class NuBerea {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
     this.mcpUrl = config?.mcpUrl ?? config?.auth?.mcpUrl ?? resolveMcpUrl(this.baseUrl);
     this.staticToken = config?.accessToken;
-    this.useSession = config?.useSession ?? false;
 
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
@@ -143,7 +139,6 @@ export class NuBerea {
       this.mcpClient = new McpClient({
         mcpUrl: this.mcpUrl,
         accessToken: token,
-        useSession: this.useSession,
       });
     } else {
       // Update token in case it was refreshed
@@ -158,11 +153,9 @@ export class NuBerea {
   // ==========================================================================
 
   /**
-   * Initialize an MCP session. Required in session mode before other calls.
-   * In stateless mode (default), this is a no-op.
+   * Perform the optional MCP initialize handshake.
    */
-  async initialize(): Promise<McpInitializeResult | null> {
-    if (!this.useSession) return null;
+  async initialize(): Promise<McpInitializeResult> {
     const mcp = await this.getMcpClient();
     return mcp.initialize();
   }
@@ -201,7 +194,7 @@ export class NuBerea {
   }
 
   /**
-   * Close the MCP session (if session-based).
+   * Reset the local MCP client and any cached initialize metadata.
    */
   async close(): Promise<void> {
     if (this.mcpClient) {
@@ -210,34 +203,19 @@ export class NuBerea {
     }
   }
 
-  /**
-   * Get the current MCP session ID (null in stateless mode).
-   */
-  getSessionId(): string | null {
-    return this.mcpClient?.getSessionId() ?? null;
-  }
-
   // ==========================================================================
   // MCP Tools
   // ==========================================================================
 
   /**
    * List all available MCP tools.
-   * Uses MCP tools/list in session mode, or the public /tools endpoint in stateless mode.
-   *
    * The `/tools` endpoint is identity-aware: when a bearer token is sent, the
    * caller tenant's active BYO-data catalog tools are merged into the built-in
    * roster. The token is attached best-effort — unauthenticated callers still
    * get the built-in roster rather than an error.
    */
   async tools(): Promise<ToolInfo[]> {
-    if (this.useSession) {
-      const mcp = await this.getMcpClient();
-      return mcp.listTools();
-    }
-
-    // Stateless: use the identity-aware public endpoint. Send the OAuth token
-    // when we have one so tenant catalog tools are included.
+    // Send the OAuth token when we have one so tenant catalog tools are included.
     const headers: Record<string, string> = {};
     try {
       headers.Authorization = `Bearer ${await this.getToken()}`;

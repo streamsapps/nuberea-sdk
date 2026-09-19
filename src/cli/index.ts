@@ -138,7 +138,6 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
     mcpUrl: (flags['mcp-url'] as string) ?? process.env.NUBEREA_MCP_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
-    useSession: !!flags.session,
   });
 }
 
