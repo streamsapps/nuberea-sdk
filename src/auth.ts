@@ -70,8 +70,8 @@ export function resolveMcpUrl(oauthBaseUrl: string): string {
 }
 
 const DEFAULT_CONFIG: AuthConfig = {
-  oauthBaseUrl: 'https://auth.nubereappe.com',
-  mcpUrl: MCP_ENDPOINTS.preproduction,
+  oauthBaseUrl: 'https://auth.nuberea.com',
+  mcpUrl: MCP_ENDPOINTS.production,
   clientId: 'mcp-client-test',
   callbackPort: 9876,
   firebaseAuthPort: 9875,

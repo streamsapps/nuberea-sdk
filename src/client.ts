@@ -41,7 +41,7 @@ export type NuBereaTokens = {
   expiresAt: number;
 };
 
-const DEFAULT_BASE = 'https://auth.nubereappe.com';
+const DEFAULT_BASE = 'https://auth.nuberea.com';
 
 export class NuBerea {
   private auth: NuBereaAuth;

@@ -19,7 +19,7 @@ describe('NuBerea MCP requests', () => {
     vi.unstubAllGlobals();
   });
 
-  it('sends MCP tool calls to the preproduction MCP host by default', async () => {
+  it('sends MCP tool calls to the production MCP host by default', async () => {
     const fetchMock = vi.fn().mockImplementation(async () =>
       new Response(JSON.stringify({
         jsonrpc: '2.0',
@@ -33,7 +33,7 @@ describe('NuBerea MCP requests', () => {
     await client.tool('example');
 
     expect(fetchMock).toHaveBeenCalledWith(
-      MCP_ENDPOINTS.preproduction,
+      MCP_ENDPOINTS.production,
       expect.objectContaining({ method: 'POST' }),
     );
     const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
