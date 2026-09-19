@@ -29,7 +29,7 @@ export interface PersistedTokens {
 // ---------------------------------------------------------------------------
 
 const KEYCHAIN_SERVICE = 'nuberea';
-const KEYCHAIN_ACCOUNT = 'tokens';
+const LEGACY_KEYCHAIN_ACCOUNT = 'tokens';
 
 type Keytar = {
   getPassword(service: string, account: string): Promise<string | null>;
@@ -65,44 +65,84 @@ function stateDir(): string {
   return path.join(xdgState, 'nuberea');
 }
 
-export function defaultTokenFile(): string {
-  return path.join(stateDir(), 'tokens.json');
+export function tokenStoreAccount(oauthBaseUrl: string): string {
+  return `tokens:${new URL(oauthBaseUrl).host}`;
+}
+
+export function defaultTokenFile(oauthBaseUrl?: string): string {
+  const fileName = oauthBaseUrl
+    ? `tokens-${new URL(oauthBaseUrl).host.replace(/[^A-Za-z0-9._-]/g, '_')}.json`
+    : 'tokens.json';
+  return path.join(stateDir(), fileName);
 }
 
 // ---------------------------------------------------------------------------
 // Legacy migration
 // ---------------------------------------------------------------------------
 
-function migrateLegacyFile(tokenFile: string): void {
-  const legacy = path.join(os.homedir(), '.nuberea', 'tokens.json');
-  if (legacy === tokenFile) return; // same path, nothing to migrate
+function readTokens(file: string): PersistedTokens | null {
   try {
-    if (!fs.existsSync(legacy)) return;
-    if (fs.existsSync(tokenFile)) {
-      // New file already exists — just clean up the old one
-      fs.unlinkSync(legacy);
-      return;
-    }
+    const raw = fs.readFileSync(file, 'utf-8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    return {
+      accessToken: parsed.accessToken as string,
+      refreshToken: parsed.refreshToken as string,
+      expiresAt: parsed.expiresAt as number,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function tokenMatchesOrigin(tokens: PersistedTokens, oauthBaseUrl: string): boolean {
+  try {
+    const payload = JSON.parse(
+      Buffer.from(tokens.accessToken.split('.')[1], 'base64url').toString('utf8'),
+    ) as { iss?: unknown };
+    return typeof payload.iss === 'string'
+      && new URL(payload.iss).origin === new URL(oauthBaseUrl).origin;
+  } catch {
+    return false;
+  }
+}
+
+function migrateLegacyFile(tokenFile: string, oauthBaseUrl: string): PersistedTokens | null {
+  if (fs.existsSync(tokenFile)) return readTokens(tokenFile);
+
+  const legacyFiles = [
+    path.join(stateDir(), 'tokens.json'),
+    path.join(os.homedir(), '.nuberea', 'tokens.json'),
+  ];
+  for (const legacy of legacyFiles) {
+    if (legacy === tokenFile || !fs.existsSync(legacy)) continue;
+    const tokens = readTokens(legacy);
+    if (!tokens || !tokenMatchesOrigin(tokens, oauthBaseUrl)) continue;
+
     const dir = path.dirname(tokenFile);
     fs.mkdirSync(dir, { recursive: true });
-    fs.renameSync(legacy, tokenFile);
-    console.error(
-      `nuberea: credentials migrated from ~/.nuberea/tokens.json → ${tokenFile}`,
-    );
-  } catch {
-    // Best-effort — do not fail startup
+    fs.writeFileSync(tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    return tokens;
   }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
 
-export async function saveTokens(tokens: PersistedTokens, tokenFile: string): Promise<void> {
+export async function saveTokens(
+  tokens: PersistedTokens,
+  tokenFile: string,
+  oauthBaseUrl: string,
+): Promise<void> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
-      await keytar.setPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT, JSON.stringify(tokens));
+      await keytar.setPassword(
+        KEYCHAIN_SERVICE,
+        tokenStoreAccount(oauthBaseUrl),
+        JSON.stringify(tokens),
+      );
       // Remove any stale file so we don't leave plaintext tokens on disk
       try { fs.unlinkSync(tokenFile); } catch { /* ok */ }
       return;
@@ -116,38 +156,38 @@ export async function saveTokens(tokens: PersistedTokens, tokenFile: string): Pr
   fs.writeFileSync(tokenFile, JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
-export async function loadTokens(tokenFile: string): Promise<PersistedTokens | null> {
-  migrateLegacyFile(tokenFile);
-
+export async function loadTokens(
+  tokenFile: string,
+  oauthBaseUrl: string,
+): Promise<PersistedTokens | null> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
-      const raw = await keytar.getPassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+      const account = tokenStoreAccount(oauthBaseUrl);
+      const raw = await keytar.getPassword(KEYCHAIN_SERVICE, account);
       if (raw) return JSON.parse(raw) as PersistedTokens;
+
+      const legacy = await keytar.getPassword(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT);
+      if (legacy) {
+        const tokens = JSON.parse(legacy) as PersistedTokens;
+        if (tokenMatchesOrigin(tokens, oauthBaseUrl)) {
+          await keytar.setPassword(KEYCHAIN_SERVICE, account, legacy);
+          return tokens;
+        }
+      }
     } catch {
       // Keychain read failed — fall through to file
     }
   }
 
-  try {
-    const raw = fs.readFileSync(tokenFile, 'utf-8');
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
-    // Strip firebaseToken if it slipped into an old file
-    return {
-      accessToken: parsed.accessToken as string,
-      refreshToken: parsed.refreshToken as string,
-      expiresAt: parsed.expiresAt as number,
-    };
-  } catch {
-    return null;
-  }
+  return readTokens(tokenFile) ?? migrateLegacyFile(tokenFile, oauthBaseUrl);
 }
 
-export async function deleteTokens(tokenFile: string): Promise<void> {
+export async function deleteTokens(tokenFile: string, oauthBaseUrl: string): Promise<void> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
-      await keytar.deletePassword(KEYCHAIN_SERVICE, KEYCHAIN_ACCOUNT);
+      await keytar.deletePassword(KEYCHAIN_SERVICE, tokenStoreAccount(oauthBaseUrl));
     } catch {
       // Ignore
     }

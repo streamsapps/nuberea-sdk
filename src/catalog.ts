@@ -54,6 +54,25 @@ export interface CatalogClientConfig {
 
 const enc = encodeURIComponent;
 
+function getErrorDetail(data: unknown): string | undefined {
+  if (typeof data === 'string') {
+    const detail = data.trim();
+    return detail && !detail.startsWith('<') ? detail : undefined;
+  }
+  if (!data || typeof data !== 'object') return undefined;
+
+  const response = data as { error?: unknown; message?: unknown; code?: unknown };
+  const message = typeof response.message === 'string'
+    ? response.message
+    : typeof response.error === 'string'
+      ? response.error
+      : undefined;
+  const code = typeof response.code === 'string' ? response.code : undefined;
+
+  if (code && message && code !== message) return `${code}: ${message}`;
+  return message ?? code;
+}
+
 export class CatalogClient {
   constructor(private readonly config: CatalogClientConfig) {}
 
@@ -80,11 +99,10 @@ export class CatalogClient {
     }
 
     if (!res.ok) {
-      const msg =
-        data && typeof data === 'object' && 'error' in data && typeof (data as { error: unknown }).error === 'string'
-          ? (data as { error: string }).error
-          : `${method} ${path} failed (HTTP ${res.status})`;
-      throw new Error(msg);
+      const detail = getErrorDetail(data);
+      throw new Error(
+        `${method} ${path} failed (HTTP ${res.status})${detail ? `: ${detail}` : ''}`,
+      );
     }
     return data as T;
   }

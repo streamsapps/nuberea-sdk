@@ -84,12 +84,20 @@ export class NuBereaAuth {
   private tokens: StoredTokens | null = null;
 
   constructor(config?: Partial<AuthConfig>) {
-    const oauthBaseUrl = config?.oauthBaseUrl ?? DEFAULT_CONFIG.oauthBaseUrl;
+    const oauthBaseUrl =
+      config?.oauthBaseUrl
+      ?? process.env.NUBEREA_BASE_URL
+      ?? DEFAULT_CONFIG.oauthBaseUrl;
+    const mcpUrl =
+      config?.mcpUrl
+      ?? process.env.NUBEREA_MCP_URL
+      ?? resolveMcpUrl(oauthBaseUrl);
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
       oauthBaseUrl,
-      mcpUrl: config?.mcpUrl ?? resolveMcpUrl(oauthBaseUrl),
+      mcpUrl,
+      tokenFile: config?.tokenFile ?? defaultTokenFile(oauthBaseUrl),
     };
   }
 
@@ -103,7 +111,7 @@ export class NuBereaAuth {
   async getAccessToken(): Promise<string> {
     // Try loading from keychain/disk
     if (!this.tokens) {
-      this.tokens = await loadTokens(this.config.tokenFile);
+      this.tokens = await loadTokens(this.config.tokenFile, this.config.oauthBaseUrl);
     }
 
     // Still valid?
@@ -142,7 +150,7 @@ export class NuBereaAuth {
       expiresAt: Date.now() + tokenResponse.expires_in * 1000,
     };
 
-    await saveTokens(this.tokens, this.config.tokenFile);
+    await saveTokens(this.tokens, this.config.tokenFile, this.config.oauthBaseUrl);
     return this.tokens;
   }
 
@@ -177,7 +185,7 @@ export class NuBereaAuth {
       expiresAt: Date.now() + data.expires_in * 1000,
     };
 
-    await saveTokens(this.tokens, this.config.tokenFile);
+    await saveTokens(this.tokens, this.config.tokenFile, this.config.oauthBaseUrl);
     return this.tokens;
   }
 
@@ -186,7 +194,7 @@ export class NuBereaAuth {
    */
   async logout(): Promise<void> {
     this.tokens = null;
-    await deleteTokens(this.config.tokenFile);
+    await deleteTokens(this.config.tokenFile, this.config.oauthBaseUrl);
   }
 
   /**
