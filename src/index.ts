@@ -31,6 +31,8 @@ export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
+export { StudioClient, parseArtifact } from './studio.js';
+export type { ResearchArtifact } from './studio.js';
 export type { CatalogClientConfig } from './catalog.js';
 export { McpClient, McpError } from './mcp.js';
 export type {

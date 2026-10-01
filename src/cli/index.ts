@@ -82,6 +82,13 @@ function usage(): void {
     --mcp-url <url>          Override MCP transport URL
     --token <token>          Use pre-set access token
 
+  RESEARCH STUDIO
+    studio run "<research brief>" --out-dir ./deliverables
+                             Run the NuBerea cloud agent and save validated files locally
+    studio files <workspaceId> --out-dir ./deliverables
+                             Recover/download files without rerunning research
+    --studio-url <url>        Override the authenticated Studio API base
+
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
     NUBEREA_MCP_URL          MCP transport URL
@@ -139,6 +146,7 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
     mcpUrl: (flags['mcp-url'] as string) ?? process.env.NUBEREA_MCP_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
     useSession: !!flags.session,
+    studioBaseUrl: typeof flags['studio-url'] === 'string' ? flags['studio-url'] : process.env.NUBEREA_STUDIO_URL,
   });
 }
 
@@ -650,6 +658,15 @@ async function main(): Promise<void> {
   }
 
   switch (command) {
+    case 'studio': {
+      const out = typeof flags['out-dir'] === 'string' ? flags['out-dir'] : undefined;
+      if (!out) die('studio requires an explicit --out-dir');
+      const artifacts = args[0] === 'run'
+        ? (await client.studio.run(args.slice(1).join(' '), (message) => console.error(message))).artifacts
+        : args[0] === 'files' && args[1] ? await client.studio.files(args[1]) : die('Use studio run <brief> or studio files <workspaceId>');
+      for (const artifact of artifacts) console.log(await client.studio.download(artifact, out));
+      return;
+    }
     case 'tool':
       return cmdTool(client, args, raw);
     case 'resources':

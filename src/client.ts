@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import { StudioClient } from './studio.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -35,6 +36,7 @@ export interface NuBereaConfig {
   accessToken?: string;
   /** Use MCP session mode (initialize + session tracking) vs stateless */
   useSession?: boolean;
+  studioBaseUrl?: string;
 }
 
 export type NuBereaTokens = {
@@ -53,6 +55,7 @@ export class NuBerea {
   private useSession: boolean;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
+  readonly studio: StudioClient;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
@@ -65,6 +68,7 @@ export class NuBerea {
       mcpUrl: this.mcpUrl,
       ...config?.auth,
     });
+    this.studio = new StudioClient(() => this.getToken(), config?.studioBaseUrl);
   }
 
   // ==========================================================================
