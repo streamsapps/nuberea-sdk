@@ -8,6 +8,7 @@
 import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
 import { StudioClient } from './studio.js';
+import { SqlStudioClient } from './sqlStudio.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -37,6 +38,8 @@ export interface NuBereaConfig {
   /** Use MCP session mode (initialize + session tracking) vs stateless */
   useSession?: boolean;
   studioBaseUrl?: string;
+  /** MCP host serving authenticated /v1/sql routes, without /mcp or /v1. */
+  sqlStudioBaseUrl?: string;
 }
 
 export type NuBereaTokens = {
@@ -56,6 +59,8 @@ export class NuBerea {
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
   readonly studio: StudioClient;
+  private sqlStudioClient: SqlStudioClient | null = null;
+  private readonly sqlStudioBaseUrl: string;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl = config?.baseUrl ?? config?.auth?.oauthBaseUrl ?? DEFAULT_BASE;
@@ -69,6 +74,7 @@ export class NuBerea {
       ...config?.auth,
     });
     this.studio = new StudioClient(() => this.getToken(), config?.studioBaseUrl);
+    this.sqlStudioBaseUrl = config?.sqlStudioBaseUrl ?? this.mcpUrl.replace(/\/mcp\/?$/, '');
   }
 
   // ==========================================================================
@@ -133,7 +139,17 @@ export class NuBerea {
         getToken: () => this.getToken(),
       });
     }
+
     return this.catalogClient;
+  }
+
+  get sqlStudio(): SqlStudioClient {
+    if (!this.sqlStudioClient) {
+      this.sqlStudioClient = new SqlStudioClient({
+        getToken: () => this.getToken(), baseUrl: this.sqlStudioBaseUrl,
+      });
+    }
+    return this.sqlStudioClient;
   }
 
   /**
@@ -307,35 +323,57 @@ export class NuBerea {
     sql: string,
     options?: { limit?: number; offset?: number; timeout?: number; format?: QueryFormat },
   ): Promise<QueryResult> {
+    if (options?.offset !== undefined && options.offset !== 0) throw new Error('Analytics query offset is not supported');
+    if (options?.timeout !== undefined) throw new Error('Analytics query timeout override is not supported');
+    if (options?.format !== undefined && options.format !== 'json') throw new Error('Analytics query format is not supported');
     const result = await this.tool('analytics_query', {
       sql,
       limit: options?.limit ?? 100,
     });
+    if (result.isError) throw new Error('Analytics query execution failed');
+    const structured = result.structuredContent;
+    if (structured !== undefined) {
+      if (structured === null || typeof structured !== 'object' || Array.isArray(structured)) {
+        throw new Error('Analytics query returned invalid structured results');
+      }
+      if ('error' in structured) throw new Error('Analytics query execution failed');
+      if (!Array.isArray(structured.columns) || !structured.columns.every((c) => typeof c === 'string')
+        || new Set(structured.columns).size !== structured.columns.length
+        || !Array.isArray(structured.rows)
+        || structured.rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row)
+          || Object.keys(row).length !== (structured.columns as string[]).length
+          || (structured.columns as string[]).some((c) => !Object.hasOwn(row, c)))
+        || structured.rowCount !== structured.rows.length
+        || typeof structured.executionTimeMs !== 'number' || !Number.isFinite(structured.executionTimeMs) || structured.executionTimeMs < 0
+        || typeof structured.truncated !== 'boolean') throw new Error('Analytics query returned invalid structured results');
+      return {
+        columns: structured.columns as string[], rows: structured.rows as Record<string, unknown>[],
+        rowCount: structured.rows.length, executionTimeMs: structured.executionTimeMs,
+        truncated: structured.truncated, offset: 0,
+      };
+    }
 
     const text = result.content.find((c) => c.type === 'text')?.text ?? '';
 
     // analytics_query returns "<summary>\n\n<json>" — extract the JSON part
     const jsonStart = text.indexOf('[');
     if (jsonStart === -1) {
-      // Might be an error or empty result
-      return {
-        columns: [],
-        rows: [],
-        rowCount: 0,
-        executionTimeMs: 0,
-        truncated: false,
-        offset: 0,
-      };
+      throw new Error('Analytics query returned no structured rows');
     }
 
     const summaryLine = text.substring(0, jsonStart).trim();
+    const summary = /^(\d+) rows returned in (\d+(?:\.\d+)?)ms(?: \(truncated\))?$/.exec(summaryLine);
+    if (!summary) throw new Error('Analytics query returned an invalid success summary');
     const rows = JSON.parse(text.substring(jsonStart)) as Record<string, unknown>[];
+    if (!Array.isArray(rows) || rows.some((row) => row === null || typeof row !== 'object' || Array.isArray(row))) {
+      throw new Error('Analytics query returned invalid rows');
+    }
+    if (Number(summary[1]) !== rows.length) throw new Error('Analytics query returned inconsistent row counts');
     const columns = rows.length > 0 ? Object.keys(rows[0]) : [];
 
     // Parse summary: "N rows returned in Xms (truncated)"
     const truncated = summaryLine.includes('truncated');
-    const timeMatch = summaryLine.match(/in (\d+)ms/);
-    const executionTimeMs = timeMatch ? parseInt(timeMatch[1], 10) : 0;
+    const executionTimeMs = Number(summary[2]);
 
     return {
       columns,

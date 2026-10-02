@@ -82,6 +82,57 @@ nuberea tool bible_kjv_search_text '{"query":"love","limit":3}' --json
 
 ## Data connectors (BYO-data)
 
+### SQL Studio Sources and approved queries
+
+`client.sqlStudio` (or the public `SqlStudioClient`) uses the existing OAuth
+token and MCP host `/v1/sql` API. It does not execute arbitrary editor SQL:
+select an owned source, choose an approved registered query, resolve its
+short-lived binding, then submit the **exact registered template** with typed
+parameters.
+
+```ts
+import { NuBerea } from '@nuberea/sdk';
+
+const client = new NuBerea();
+await client.login();
+const tenant = (await client.catalog.listTenants())[0];
+if (!tenant) throw new Error('Connect your data under an owned tenant first');
+const sources = await client.sqlStudio.sources(tenant.tenantId);
+const source = sources.find(s => s.status === 'available');
+if (!source) throw new Error('No available registered SQL source');
+const approved = source.registeredQueries[0];
+const binding = await client.sqlStudio.resolve(
+  source.id, tenant.tenantId, approved.toolId,
+);
+const result = await client.sqlStudio.query({
+  queryId: 'query-1',
+  binding,
+  sql: approved.sql,
+  parameters: {}, // fill the approved inputSchema's required fields
+  rowLimit: Math.min(10, approved.rowLimit),
+  mode: 'remote',
+});
+console.log(result.columns, result.rows);
+```
+
+Source IDs are `catalog:<tenantId>:<connectorId>`. `source(id, tenantId)` loads
+a single descriptor. Descriptors include real schema, relation names, status,
+registered templates and restricted capabilities. Bindings are references,
+not authority: the server rechecks ownership and live policy on every query.
+Configuration fingerprints are **not immutable data snapshots**. Wide
+integers/decimals and temporal, binary and JSON cells are string-valued tagged
+values; unknown totals remain absent. Empty results retain their schema.
+Responses are runtime-validated, and `SqlStudioError` retains HTTP
+`status`, `code`, `message` and `details`; no error is converted to empty success.
+
+Only remote, read-only registered execution is implemented. Optional row and
+engine-timeout bounds can tighten, never widen, policy. Offsets, scan/byte
+overrides, cancellation and idempotency keys are rejected. Passing an
+`AbortSignal` only aborts the client's wait, not server execution. Resolve again
+on `STALE_BINDING`. The legacy `client.query` still uses `analytics_query`, but
+now throws on execution/malformed-text failures instead of fabricating empty
+rows, and rejects unsupported offset/timeout/format options before executing.
+
 Register your own data so it becomes queryable through the NuBerea MCP server.
 A **connector** belongs to a **tenant** (your org unit); parameterized,
 SELECT-only SQL **tools** are registered against it. Two kinds are supported:
