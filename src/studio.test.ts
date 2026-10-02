@@ -23,6 +23,25 @@ function checkpointFixture() {
 }
 
 describe('persistent workspace checkpoints', () => {
+  it('canonicalizes checkpoint IDs before research/restore and accepts the same canonical owned receipt', async () => {
+    const checkpointId = 'abcdef01-1234-4234-8234-123456789012';
+    const client = new StudioClient(async () => 'fixture', undefined, async (url, init) => {
+      const body = JSON.parse(String(init?.body));
+      expect(body.checkpointId).toBe(checkpointId);
+      return new Response(JSON.stringify(String(url).endsWith('/research-runs')
+        ? receipt({ checkpointId })
+        : { operationId: runId, workspaceId, kind: 'resume', status: 'succeeded',
+          checkpoint: { ...checkpointFixture(), checkpointId } }));
+    });
+    expect((await client.submit('Continue', { workspaceId, checkpointId: checkpointId.toUpperCase() })).checkpointId).toBe(checkpointId);
+    expect((await client.resumeCompute(workspaceId, checkpointId.toUpperCase())).checkpoint.checkpointId).toBe(checkpointId);
+  });
+  it('rejects missing or unsolicited checkpoint admission bindings instead of silently starting different research', async () => {
+    const client = new StudioClient(async () => 'fixture', undefined,
+      async () => new Response(JSON.stringify(receipt())));
+    await expect(client.submit('Continue', { workspaceId, checkpointId: runId })).rejects.toThrow('another checkpoint');
+    await expect(client.submit('Continue', { workspaceId, checkpointId: '' })).rejects.toThrow('Invalid');
+  });
   it('verifies immutable metadata and refuses unsafe paths, foreign workspaces, tampering and memory claims', () => {
     const checkpoint = checkpointFixture();
     expect(parseCheckpoint(checkpoint).checkpointId).toBe(runId);

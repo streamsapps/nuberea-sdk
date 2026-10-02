@@ -155,7 +155,8 @@ export class StudioClient {
   }
   async submit(goal: string, options: { mode?: StudioMode; workspaceId?: string; idempotencyKey?: string; checkpointId?: string } = {}): Promise<ResearchRun> {
     if (!goal.trim() || goal.length > 8000) throw new Error('Provide a research brief of at most 8000 characters');
-    if (options.checkpointId && !options.workspaceId) throw new Error('Restoring a checkpoint requires its owned workspace ID');
+    if (options.checkpointId !== undefined && !options.workspaceId) throw new Error('Restoring a checkpoint requires its owned workspace ID');
+    const checkpointId = options.checkpointId === undefined ? undefined : uuid(options.checkpointId).toLowerCase();
     const selectedMode = options.mode ?? 'auto';
     if (!mode(selectedMode)) throw new Error('Invalid Studio run mode');
     const key = options.idempotencyKey ?? randomUUID();
@@ -169,9 +170,10 @@ export class StudioClient {
       workspaceId = created.workspaceId;
     }
     const result = parseResearchRun(await this.request(`/${uuid(workspaceId)}/research-runs`, {
-      goal: goal.trim(), mode: selectedMode, ...(options.checkpointId ? { checkpointId: uuid(options.checkpointId) } : {}),
+      goal: goal.trim(), mode: selectedMode, ...(checkpointId === undefined ? {} : { checkpointId }),
     }, { key }));
     if (result.workspaceId !== workspaceId) throw new Error('Research admission returned another workspace');
+    if (result.checkpointId !== checkpointId) throw new Error('Research admission returned another checkpoint');
     return result;
   }
   async checkpoints(workspaceId: string): Promise<WorkspaceCheckpoint[]> {
@@ -206,12 +208,13 @@ export class StudioClient {
   }
   async resumeCompute(workspaceId: string, checkpointId: string, options: { key?: string; signal?: AbortSignal } = {}) {
     if (options.key !== undefined && !/^[A-Za-z0-9_-]{8,128}(?![\s\S])/.test(options.key)) throw new Error('Invalid restore idempotency key');
+    const canonicalCheckpointId = uuid(checkpointId).toLowerCase();
     const admitted = await this.request(`/${uuid(workspaceId)}/operations`, {
-      kind: 'resume', checkpointId: uuid(checkpointId), sessionTimeoutSeconds: 900,
+      kind: 'resume', checkpointId: canonicalCheckpointId, sessionTimeoutSeconds: 900,
     }, { ...(options.key ? { key: options.key } : {}), ...(options.signal ? { signal: options.signal } : {}) });
     const done = await this.waitOperation(workspaceId, admitted, 'resume', options.signal);
     const checkpoint = parseCheckpoint(done.checkpoint);
-    if (checkpoint.checkpointId !== checkpointId || checkpoint.workspaceId !== workspaceId) throw new Error('Restore receipt returned another checkpoint');
+    if (checkpoint.checkpointId !== canonicalCheckpointId || checkpoint.workspaceId !== workspaceId) throw new Error('Restore receipt returned another checkpoint');
     return { operationId: String(done.operationId), checkpoint, memoryRestored: false, codeReplayed: false };
   }
   private async waitOperation(workspaceId: string, admitted: unknown, kind: 'checkpoint' | 'resume', signal?: AbortSignal): Promise<Record<string, unknown>> {
