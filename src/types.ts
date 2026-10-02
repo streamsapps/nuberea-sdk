@@ -15,6 +15,7 @@ export interface ToolInfo {
 export interface ToolResult {
   content: Array<{ type: string; text: string }>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 }
 
 // ============================================================================

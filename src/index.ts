@@ -31,6 +31,13 @@ export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
+export {
+  SqlStudioClient, SqlStudioError, parseSourceDescription, parseSourceBinding, parseSqlQueryResult,
+} from './sqlStudio.js';
+export type {
+  SqlStudioClientConfig, SourceDescription, SourceBinding, RegisteredQuery,
+  SqlCellValue, SqlColumnType, SqlColumn, SqlQueryRequest, SqlQueryResult,
+} from './sqlStudio.js';
 export { StudioClient, parseArtifact, parseResearchRun, MAX_STUDIO_ARTIFACT_BYTES } from './studio.js';
 export type { ResearchArtifact, ResearchRun, ResearchRunEvent, ResearchRunStatus, StudioMode } from './studio.js';
 export type { CatalogClientConfig } from './catalog.js';
