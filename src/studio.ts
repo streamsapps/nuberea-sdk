@@ -16,6 +16,7 @@ export interface ResearchRun {
   lastSequence: number;
   cancellationRequested: boolean;
   partialMessage?: string;
+  checkpointId?: string;
   outcome?: { event: 'done' | 'error'; data: Record<string, unknown> };
 }
 export interface ResearchRunEvent {
@@ -31,6 +32,20 @@ export interface ResearchArtifact {
   name: string;
   sha256: string;
   size: number;
+  mediaType?: string;
+  createdAt?: string;
+}
+export interface WorkspaceCheckpoint {
+  version: 1;
+  checkpointId: string;
+  workspaceId: string;
+  label: string;
+  createdAt: string;
+  files: (ResearchArtifact & { mediaType: string; createdAt: string; path: string })[];
+  totalBytes: number;
+  manifestSha256: string;
+  memoryRestored: false;
+  codeReplayed: false;
 }
 export const MAX_STUDIO_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const uuid = (value: string) => {
@@ -50,6 +65,7 @@ export function parseResearchRun(value: unknown): ResearchRun {
     || typeof value.updatedAt !== 'string' || !Number.isFinite(Date.parse(value.updatedAt))
     || typeof value.lastSequence !== 'number' || !Number.isSafeInteger(value.lastSequence) || value.lastSequence < 0
     || typeof value.cancellationRequested !== 'boolean'
+    || (value.checkpointId !== undefined && typeof value.checkpointId !== 'string')
     || (value.partialMessage !== undefined && typeof value.partialMessage !== 'string')) {
     throw new Error('Invalid persistent research run');
   }
@@ -64,18 +80,50 @@ export function parseResearchRun(value: unknown): ResearchRun {
     mode: value.mode, status: value.status, createdAt: value.createdAt, updatedAt: value.updatedAt,
     lastSequence: value.lastSequence, cancellationRequested: value.cancellationRequested,
     ...(typeof value.partialMessage === 'string' ? { partialMessage: value.partialMessage } : {}),
+    ...(typeof value.checkpointId === 'string' ? { checkpointId: uuid(value.checkpointId) } : {}),
     ...(outcome ? { outcome } : {}),
   };
+}
+
+export function parseCheckpoint(value: unknown): WorkspaceCheckpoint {
+  if (!record(value) || value.version !== 1 || typeof value.checkpointId !== 'string'
+    || typeof value.workspaceId !== 'string' || typeof value.label !== 'string'
+    || typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))
+    || !Array.isArray(value.files) || value.files.length < 1 || value.files.length > 32
+    || typeof value.totalBytes !== 'number' || !Number.isSafeInteger(value.totalBytes)
+    || value.totalBytes > 64 * 1024 * 1024 || value.totalBytes < 0
+    || typeof value.manifestSha256 !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.manifestSha256)
+    || value.memoryRestored !== false || value.codeReplayed !== false) throw new Error('Invalid checkpoint manifest');
+  const workspaceId = uuid(value.workspaceId);
+  const files = value.files.map((item) => {
+    const artifact = parseArtifact(item);
+    if (!record(item) || typeof item.mediaType !== 'string' || typeof item.createdAt !== 'string'
+      || !Number.isFinite(Date.parse(item.createdAt)) || item.path !== `outputs/${artifact.name}`
+      || artifact.workspaceId !== workspaceId) throw new Error('Invalid checkpoint file');
+    return { ...artifact, mediaType: item.mediaType, createdAt: item.createdAt, path: item.path };
+  });
+  if (new Set(files.map((file) => file.path)).size !== files.length
+    || files.reduce((sum, file) => sum + file.size, 0) !== value.totalBytes
+    || createHash('sha256').update(JSON.stringify(files)).digest('hex') !== value.manifestSha256) {
+    throw new Error('Checkpoint integrity failed');
+  }
+  return { version: 1, checkpointId: uuid(value.checkpointId), workspaceId, label: value.label,
+    createdAt: value.createdAt, files, totalBytes: value.totalBytes, manifestSha256: value.manifestSha256,
+    memoryRestored: false, codeReplayed: false };
 }
 export function parseArtifact(value: unknown): ResearchArtifact {
   if (!record(value) || typeof value.artifactId !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.artifactId)
     || typeof value.workspaceId !== 'string' || typeof value.name !== 'string'
     || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.(md|csv|json|txt|py|png|jpg|jpeg|pdf|mp4|webm|npy|npz|parquet)(?![\s\S])/.test(value.name)
     || typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.sha256)
-    || typeof value.size !== 'number' || !Number.isInteger(value.size) || value.size < 0 || value.size > MAX_STUDIO_ARTIFACT_BYTES) {
+    || typeof value.size !== 'number' || !Number.isInteger(value.size) || value.size < 0 || value.size > MAX_STUDIO_ARTIFACT_BYTES
+    || (value.mediaType !== undefined && typeof value.mediaType !== 'string')
+    || (value.createdAt !== undefined && (typeof value.createdAt !== 'string' || !Number.isFinite(Date.parse(value.createdAt))))) {
     throw new Error('Invalid research deliverable manifest');
   }
-  return { artifactId: value.artifactId, workspaceId: uuid(value.workspaceId), name: value.name, sha256: value.sha256, size: value.size };
+  return { artifactId: value.artifactId, workspaceId: uuid(value.workspaceId), name: value.name, sha256: value.sha256, size: value.size,
+    ...(typeof value.mediaType === 'string' ? { mediaType: value.mediaType } : {}),
+    ...(typeof value.createdAt === 'string' ? { createdAt: value.createdAt } : {}) };
 }
 
 export class StudioClient {
@@ -94,7 +142,10 @@ export class StudioClient {
       signal: options.signal,
     });
     const data: unknown = await response.json();
-    if (!response.ok) throw new Error(record(data) && typeof data.message === 'string' ? data.message : `Studio request failed (${response.status})`);
+    if (!response.ok) {
+      const error = record(data) && record(data.error) ? data.error : data;
+      throw new Error(record(error) && typeof error.message === 'string' ? error.message : `Studio request failed (${response.status})`);
+    }
     return data;
   }
   async files(workspaceId: string): Promise<ResearchArtifact[]> {
@@ -102,8 +153,9 @@ export class StudioClient {
     if (!record(data) || !Array.isArray(data.artifacts)) throw new Error('Invalid deliverable list');
     return data.artifacts.map(parseArtifact);
   }
-  async submit(goal: string, options: { mode?: StudioMode; workspaceId?: string; idempotencyKey?: string } = {}): Promise<ResearchRun> {
+  async submit(goal: string, options: { mode?: StudioMode; workspaceId?: string; idempotencyKey?: string; checkpointId?: string } = {}): Promise<ResearchRun> {
     if (!goal.trim() || goal.length > 8000) throw new Error('Provide a research brief of at most 8000 characters');
+    if (options.checkpointId && !options.workspaceId) throw new Error('Restoring a checkpoint requires its owned workspace ID');
     const selectedMode = options.mode ?? 'auto';
     if (!mode(selectedMode)) throw new Error('Invalid Studio run mode');
     const key = options.idempotencyKey ?? randomUUID();
@@ -116,9 +168,73 @@ export class StudioClient {
       if (!record(created) || typeof created.workspaceId !== 'string') throw new Error('Invalid research workspace');
       workspaceId = created.workspaceId;
     }
-    const result = parseResearchRun(await this.request(`/${uuid(workspaceId)}/research-runs`, { goal: goal.trim(), mode: selectedMode }, { key }));
+    const result = parseResearchRun(await this.request(`/${uuid(workspaceId)}/research-runs`, {
+      goal: goal.trim(), mode: selectedMode, ...(options.checkpointId ? { checkpointId: uuid(options.checkpointId) } : {}),
+    }, { key }));
     if (result.workspaceId !== workspaceId) throw new Error('Research admission returned another workspace');
     return result;
+  }
+  async checkpoints(workspaceId: string): Promise<WorkspaceCheckpoint[]> {
+    const result: WorkspaceCheckpoint[] = [];
+    let cursor: string | undefined;
+    for (let page = 0; page < 20; page++) {
+      const data = await this.request(`/${uuid(workspaceId)}/checkpoints${cursor ? `?cursor=${uuid(cursor)}` : ''}`);
+      if (!record(data) || !Array.isArray(data.checkpoints)) throw new Error('Invalid checkpoint history');
+      const checkpoints = data.checkpoints.map(parseCheckpoint);
+      if (checkpoints.some((item) => item.workspaceId !== workspaceId)) throw new Error('Checkpoint history returned another workspace');
+      result.push(...checkpoints);
+      if (data.nextCursor === undefined) return result.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      if (typeof data.nextCursor !== 'string' || data.nextCursor === cursor) throw new Error('Checkpoint history made no progress');
+      cursor = uuid(data.nextCursor);
+    }
+    throw new Error('Checkpoint history exceeds the bounded page limit');
+  }
+  async checkpoint(workspaceId: string, artifactIds: string[], options: { label?: string; key?: string; signal?: AbortSignal } = {}): Promise<WorkspaceCheckpoint> {
+    if (artifactIds.length < 1 || artifactIds.length > 32 || artifactIds.some((id) => !/^[a-f0-9]{64}(?![\s\S])/.test(id))
+      || new Set(artifactIds).size !== artifactIds.length) {
+      throw new Error('Select 1-32 owned checkpoint files');
+    }
+    if (options.label !== undefined && (!options.label.trim() || options.label.length > 120)) throw new Error('Checkpoint label must be 1-120 characters');
+    if (options.key !== undefined && !/^[A-Za-z0-9_-]{8,128}(?![\s\S])/.test(options.key)) throw new Error('Invalid checkpoint idempotency key');
+    const admitted = await this.request(`/${uuid(workspaceId)}/checkpoints`, {
+      artifactIds, ...(options.label ? { label: options.label } : {}),
+    }, { ...(options.key ? { key: options.key } : {}), ...(options.signal ? { signal: options.signal } : {}) });
+    const done = await this.waitOperation(workspaceId, admitted, 'checkpoint', options.signal);
+    const checkpoint = parseCheckpoint(done.checkpoint);
+    if (checkpoint.workspaceId !== workspaceId) throw new Error('Checkpoint receipt returned another workspace');
+    return checkpoint;
+  }
+  async resumeCompute(workspaceId: string, checkpointId: string, options: { key?: string; signal?: AbortSignal } = {}) {
+    if (options.key !== undefined && !/^[A-Za-z0-9_-]{8,128}(?![\s\S])/.test(options.key)) throw new Error('Invalid restore idempotency key');
+    const admitted = await this.request(`/${uuid(workspaceId)}/operations`, {
+      kind: 'resume', checkpointId: uuid(checkpointId), sessionTimeoutSeconds: 900,
+    }, { ...(options.key ? { key: options.key } : {}), ...(options.signal ? { signal: options.signal } : {}) });
+    const done = await this.waitOperation(workspaceId, admitted, 'resume', options.signal);
+    const checkpoint = parseCheckpoint(done.checkpoint);
+    if (checkpoint.checkpointId !== checkpointId || checkpoint.workspaceId !== workspaceId) throw new Error('Restore receipt returned another checkpoint');
+    return { operationId: String(done.operationId), checkpoint, memoryRestored: false, codeReplayed: false };
+  }
+  private async waitOperation(workspaceId: string, admitted: unknown, kind: 'checkpoint' | 'resume', signal?: AbortSignal): Promise<Record<string, unknown>> {
+    if (!record(admitted) || typeof admitted.operationId !== 'string' || admitted.workspaceId !== workspaceId || admitted.kind !== kind) {
+      throw new Error('Invalid checkpoint operation admission');
+    }
+    const operationId = uuid(admitted.operationId);
+    let current = admitted;
+    for (let polls = 0; polls < 600; polls++) {
+      if (current.operationId !== operationId || current.workspaceId !== workspaceId || current.kind !== kind) {
+        throw new Error('Checkpoint polling returned another operation');
+      }
+      if (current.status === 'succeeded') return current;
+      if (current.status === 'failed' || current.status === 'indeterminate') {
+        throw new Error(`Checkpoint operation ${operationId} ${current.status}: ${String(current.errorCode ?? 'check saved workspace state')}`);
+      }
+      if (current.status !== 'queued' && current.status !== 'running') throw new Error('Invalid checkpoint operation status');
+      await sleep(1000, undefined, signal ? { signal } : {});
+      const next = await this.request(`/${uuid(workspaceId)}/operations/${operationId}`, undefined, signal ? { signal } : {});
+      if (!record(next)) throw new Error('Invalid checkpoint operation receipt');
+      current = next;
+    }
+    throw new Error(`Checkpoint operation ${operationId} is still pending; reconcile it instead of resubmitting`);
   }
   async sessions(workspaceId: string): Promise<ResearchRun[]> {
     const data = await this.request(`/${uuid(workspaceId)}/research-runs`);
@@ -173,16 +289,20 @@ export class StudioClient {
       throw new Error(`Stopped following run ${runId} in workspace ${workspaceId} at event ${cursor}. This does not cancel remote work; inspect or reconnect, do not automatically rerun.`, { cause: error });
     }
   }
-  async run(goal: string, onProgress: (message: string) => void = () => {}, signal?: AbortSignal, selectedMode: StudioMode = 'auto') {
+  async run(goal: string, onProgress: (message: string) => void = () => {}, signal?: AbortSignal, selectedMode: StudioMode = 'auto',
+    options: { workspaceId?: string; checkpointId?: string } = {}) {
     signal?.throwIfAborted();
-    const submitted = await this.submit(goal, { mode: selectedMode });
+    const submitted = await this.submit(goal, { mode: selectedMode, ...options });
     onProgress(`Workspace: ${submitted.workspaceId}; run: ${submitted.runId}`);
     const run = await this.follow(submitted.workspaceId, submitted.runId, onProgress, signal);
     if (run.status !== 'completed' || run.outcome?.event !== 'done') {
       throw new Error(record(run.outcome?.data) && typeof run.outcome.data.message === 'string'
         ? `${run.outcome.data.message} (run ${run.runId})` : `Research ${run.status}; run ${run.runId}. Inspect saved files before continuing.`);
     }
-    return { workspaceId: run.workspaceId, runId: run.runId, artifacts: await this.files(run.workspaceId), outcome: run.outcome.data };
+    const artifacts = Array.isArray(run.outcome.data.artifacts)
+      ? run.outcome.data.artifacts.map(parseArtifact) : await this.files(run.workspaceId);
+    if (artifacts.some((file) => file.workspaceId !== run.workspaceId)) throw new Error('Research returned another workspace file');
+    return { workspaceId: run.workspaceId, runId: run.runId, artifacts, outcome: run.outcome.data };
   }
   async download(artifact: ResearchArtifact, outputDirectory: string): Promise<string> {
     const manifest = parseArtifact(artifact);

@@ -89,6 +89,11 @@ function usage(): void {
                              Recover/download files without rerunning research
     studio submit "<brief>"  Queue research and return persistent IDs without waiting
     studio sessions <workspaceId>
+    studio checkpoints <workspaceId>
+    studio checkpoint <workspaceId> <artifactId>... [--label "Saved research"]
+    studio resume <workspaceId> <checkpointId>
+                             Restore files into fresh cloud compute; never replay code locally
+    studio run "<brief>" --workspace <workspaceId> --checkpoint <checkpointId> --out-dir ./deliverables
     studio status <workspaceId> <runId>
     studio follow <workspaceId> <runId> [--out-dir ./deliverables]
     studio cancel <workspaceId> <runId>
@@ -669,9 +674,21 @@ async function main(): Promise<void> {
     case 'studio': {
       const out = typeof flags['out-dir'] === 'string' ? flags['out-dir'] : undefined;
       const mode = flags.mode ?? 'auto';
+      const continuation = {
+        ...(typeof flags.workspace === 'string' ? { workspaceId: flags.workspace } : {}),
+        ...(typeof flags.checkpoint === 'string' ? { checkpointId: flags.checkpoint } : {}),
+      };
       if (mode !== 'auto' && mode !== 'research' && mode !== 'compute') die('--mode must be auto, research or compute');
       if (args[0] === 'submit') return console.log(formatJson(await client.studio.submit(args.slice(1).join(' '), {
-        mode, ...(typeof flags['idempotency-key'] === 'string' ? { idempotencyKey: flags['idempotency-key'] } : {}),
+        mode, ...continuation, ...(typeof flags['idempotency-key'] === 'string' ? { idempotencyKey: flags['idempotency-key'] } : {}),
+      }), raw));
+      if (args[0] === 'checkpoints' && args[1]) return console.log(formatJson(await client.studio.checkpoints(args[1]), raw));
+      if (args[0] === 'checkpoint' && args[1] && args.length > 2) return console.log(formatJson(await client.studio.checkpoint(args[1], args.slice(2), {
+        ...(typeof flags.label === 'string' ? { label: flags.label } : {}),
+        ...(typeof flags['idempotency-key'] === 'string' ? { key: flags['idempotency-key'] } : {}),
+      }), raw));
+      if (args[0] === 'resume' && args[1] && args[2]) return console.log(formatJson(await client.studio.resumeCompute(args[1], args[2], {
+        ...(typeof flags['idempotency-key'] === 'string' ? { key: flags['idempotency-key'] } : {}),
       }), raw));
       if (args[0] === 'sessions' && args[1]) return console.log(formatJson(await client.studio.sessions(args[1]), raw));
       if (args[0] === 'status' && args[1] && args[2]) return console.log(formatJson(await client.studio.status(args[1], args[2]), raw));
@@ -687,7 +704,7 @@ async function main(): Promise<void> {
       }
       if (!out) die('studio run/files requires an explicit --out-dir');
       const artifacts = args[0] === 'run'
-        ? (await client.studio.run(args.slice(1).join(' '), (message) => console.error(message), undefined, mode)).artifacts
+        ? (await client.studio.run(args.slice(1).join(' '), (message) => console.error(message), undefined, mode, continuation)).artifacts
         : args[0] === 'files' && args[1] ? await client.studio.files(args[1]) : die('Use studio run <brief> or studio files <workspaceId>');
       for (const artifact of artifacts) console.log(await client.studio.download(artifact, out));
       return;

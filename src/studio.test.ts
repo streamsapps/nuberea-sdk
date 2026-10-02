@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MAX_STUDIO_ARTIFACT_BYTES, StudioClient, parseArtifact, parseResearchRun, type ResearchRun } from './studio.js';
+import { MAX_STUDIO_ARTIFACT_BYTES, StudioClient, parseArtifact, parseCheckpoint, parseResearchRun, type ResearchRun } from './studio.js';
 
 const workspaceId = '12345678-1234-4234-8234-123456789012';
 const runId = '12345678-1234-4234-8234-123456789013';
@@ -11,6 +11,60 @@ const receipt = (overrides: Partial<ResearchRun> = {}): ResearchRun => ({
   runId, workspaceId, goal: 'Plot a sine wave', mode: 'compute', status: 'queued',
   createdAt: '2026-10-02T00:00:00.000Z', updatedAt: '2026-10-02T00:00:00.000Z',
   lastSequence: 0, cancellationRequested: false, ...overrides,
+});
+function checkpointFixture() {
+  const files = [{
+    artifactId: 'a'.repeat(64), workspaceId, name: 'analysis.py', sha256: 'b'.repeat(64), size: 3,
+    mediaType: 'text/x-python', createdAt: '2026-10-02T00:00:00.000Z', path: 'outputs/analysis.py',
+  }];
+  return { version: 1, checkpointId: runId, workspaceId, label: 'Progress', createdAt: '2026-10-02T00:00:00.000Z',
+    files, totalBytes: 3, manifestSha256: createHash('sha256').update(JSON.stringify(files)).digest('hex'),
+    memoryRestored: false, codeReplayed: false };
+}
+
+describe('persistent workspace checkpoints', () => {
+  it('verifies immutable metadata and refuses unsafe paths, foreign workspaces, tampering and memory claims', () => {
+    const checkpoint = checkpointFixture();
+    expect(parseCheckpoint(checkpoint).checkpointId).toBe(runId);
+    expect(() => parseCheckpoint({ ...checkpoint, memoryRestored: true })).toThrow();
+    expect(() => parseCheckpoint({ ...checkpoint, totalBytes: 4 })).toThrow('integrity');
+    expect(() => parseCheckpoint({ ...checkpoint, files: [{ ...checkpoint.files[0], path: '../analysis.py' }] })).toThrow();
+    expect(() => parseCheckpoint({ ...checkpoint, files: [{ ...checkpoint.files[0], workspaceId: runId }] })).toThrow();
+    expect(() => parseCheckpoint({ ...checkpoint, manifestSha256: 'f'.repeat(64) })).toThrow('integrity');
+  });
+  it('saves metadata through a durable operation and restores only by explicit checkpoint ID', async () => {
+    const checkpoint = checkpointFixture();
+    const calls: { path: string; body: unknown; key: string | null }[] = [];
+    const client = new StudioClient(async () => 'scoped-token', undefined, async (url, init) => {
+      const body = init?.body ? JSON.parse(String(init.body)) : undefined;
+      calls.push({ path: new URL(String(url)).pathname, body, key: new Headers(init?.headers).get('Idempotency-Key') });
+      return new Response(JSON.stringify({ operationId: runId, workspaceId,
+        kind: String(url).endsWith('/checkpoints') ? 'checkpoint' : 'resume', status: 'succeeded', checkpoint }));
+    });
+    expect((await client.checkpoint(workspaceId, ['a'.repeat(64)], { key: 'save-checkpoint-key' })).checkpointId).toBe(runId);
+    const restored = await client.resumeCompute(workspaceId, runId, { key: 'resume-checkpoint-key' });
+    expect(restored.codeReplayed).toBe(false);
+    expect(calls[0].key).toBe('save-checkpoint-key');
+    expect(calls[1].body).toEqual({ kind: 'resume', checkpointId: runId, sessionTimeoutSeconds: 900 });
+  });
+  it('requires owned workspace selection before checkpoint-aware research and retains it in the run receipt', async () => {
+    let calls = 0;
+    const client = new StudioClient(async () => 'token', undefined, async (_url, init) => {
+      calls++;
+      expect(JSON.parse(String(init?.body))).toEqual({ goal: 'Continue analysis', mode: 'compute', checkpointId: runId });
+      return new Response(JSON.stringify(receipt({ goal: 'Continue analysis', checkpointId: runId })));
+    });
+    await expect(client.submit('Continue analysis', { checkpointId: runId })).rejects.toThrow('workspace ID');
+    expect(calls).toBe(0);
+    expect((await client.submit('Continue analysis', { mode: 'compute', workspaceId, checkpointId: runId })).checkpointId).toBe(runId);
+  });
+  it('rejects duplicate checkpoint files and malformed retry keys before credential work', async () => {
+    let credentials = 0;
+    const client = new StudioClient(async () => { credentials++; return 'token'; });
+    await expect(client.checkpoint(workspaceId, ['a'.repeat(64), 'a'.repeat(64)])).rejects.toThrow();
+    await expect(client.checkpoint(workspaceId, ['a'.repeat(64)], { key: 'bad\nkey' })).rejects.toThrow();
+    expect(credentials).toBe(0);
+  });
 });
 
 describe('durable Studio runs', () => {

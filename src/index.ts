@@ -31,8 +31,8 @@ export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
-export { StudioClient, parseArtifact, parseResearchRun, MAX_STUDIO_ARTIFACT_BYTES } from './studio.js';
-export type { ResearchArtifact, ResearchRun, ResearchRunEvent, ResearchRunStatus, StudioMode } from './studio.js';
+export { StudioClient, parseArtifact, parseCheckpoint, parseResearchRun, MAX_STUDIO_ARTIFACT_BYTES } from './studio.js';
+export type { ResearchArtifact, ResearchRun, ResearchRunEvent, ResearchRunStatus, StudioMode, WorkspaceCheckpoint } from './studio.js';
 export type { CatalogClientConfig } from './catalog.js';
 export { McpClient, McpError } from './mcp.js';
 export type {
