@@ -272,3 +272,47 @@ NuBerea uses OAuth 2.1 with PKCE.
 ## License
 
 MIT
+# Agent-led research from VS Code
+
+The Studio client invokes the same NuBerea cloud research agent as the browser.
+It is not an arbitrary local code runner. In the VS Code terminal:
+
+```sh
+nuberea studio run "Compare Romans 5 vocabulary and produce a sourced report and CSV" --out-dir ./deliverables
+nuberea studio run "Plot a sine wave with NumPy and Matplotlib; save plot.png and methodology.md" --mode compute --out-dir ./deliverables
+nuberea studio submit "Compare Romans 5 vocabulary and produce a sourced report and CSV"
+nuberea studio sessions <workspace-id>
+nuberea studio status <workspace-id> <run-id>
+nuberea studio follow <workspace-id> <run-id> --out-dir ./deliverables
+nuberea studio cancel <workspace-id> <run-id>
+nuberea studio files <workspace-id> --out-dir ./deliverables
+```
+
+Use `NUBEREA_STUDIO_URL=https://api.nubereappe.com/v1` for the dev pilot.
+Existing NuBerea OAuth login authenticates the user; approved verified-account
+access and workspace budgets remain server-enforced. `submit` returns a durable
+run receipt without waiting. `run` submits and follows the same queued-run API;
+`follow` reconnects without executing another job. Exiting or aborting a
+subscription does **not** cancel remote work: use `cancel` explicitly. Do not
+automatically resubmit an uncertain admission; the library supports an explicit
+idempotency key for safe same-request reconciliation.
+
+The library exposes `submit`, `sessions`, `status`, `events`, `follow`, `cancel`,
+`files` and `download`. Event pages have monotonic cursors; terminal outcomes
+and history come from the server, not receipt of a terminal SSE frame. These
+commands require the durable-job backend and worker to be enabled; they never
+silently fall back to the legacy request-bound stream. Backend rollout is tracked
+in [chat #94](https://github.com/streamsapps/nuberea-chat-api/issues/94).
+
+Downloads validate declared/max size (8 MiB) and SHA-256 before exclusive local
+writes. Supported outputs include text, Python scripts, images, PDFs, videos,
+NumPy arrays and Parquet files. No generated code is executed locally. Files
+persist after compute stops and can be recovered with `studio files`.
+Compute mode requires successful remote code execution; code execution is not
+an assertion of scientific correctness or comprehensive source coverage.
+
+See the [platform roadmap](https://github.com/streamsapps/nuberea-workspaces/blob/feat/agent-led-research-contract/docs/RESEARCH_PLATFORM_ROADMAP.md)
+for persistent filesystem restoration, HF publication and all repository tasks.
+
+This command is available from this PR's source build until a new SDK release is
+published. Unrelated local historical-source work is not part of this feature.

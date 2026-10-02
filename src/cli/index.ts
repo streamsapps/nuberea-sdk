@@ -87,7 +87,15 @@ function usage(): void {
                              Run the NuBerea cloud agent and save validated files locally
     studio files <workspaceId> --out-dir ./deliverables
                              Recover/download files without rerunning research
+    studio submit "<brief>"  Queue research and return persistent IDs without waiting
+    studio sessions <workspaceId>
+    studio status <workspaceId> <runId>
+    studio follow <workspaceId> <runId> [--out-dir ./deliverables]
+    studio cancel <workspaceId> <runId>
+                             Disconnecting the CLI does not cancel remote work
     --studio-url <url>        Override the authenticated Studio API base
+    --mode auto|research|compute
+                             Require verified remote execution for compute tasks
 
   ENVIRONMENT
     NUBEREA_BASE_URL         API base URL
@@ -660,9 +668,26 @@ async function main(): Promise<void> {
   switch (command) {
     case 'studio': {
       const out = typeof flags['out-dir'] === 'string' ? flags['out-dir'] : undefined;
-      if (!out) die('studio requires an explicit --out-dir');
+      const mode = flags.mode ?? 'auto';
+      if (mode !== 'auto' && mode !== 'research' && mode !== 'compute') die('--mode must be auto, research or compute');
+      if (args[0] === 'submit') return console.log(formatJson(await client.studio.submit(args.slice(1).join(' '), {
+        mode, ...(typeof flags['idempotency-key'] === 'string' ? { idempotencyKey: flags['idempotency-key'] } : {}),
+      }), raw));
+      if (args[0] === 'sessions' && args[1]) return console.log(formatJson(await client.studio.sessions(args[1]), raw));
+      if (args[0] === 'status' && args[1] && args[2]) return console.log(formatJson(await client.studio.status(args[1], args[2]), raw));
+      if (args[0] === 'cancel' && args[1] && args[2]) return console.log(formatJson(await client.studio.cancel(args[1], args[2]), raw));
+      if (args[0] === 'follow' && args[1] && args[2]) {
+        const run = await client.studio.follow(args[1], args[2], (message) => console.error(message));
+        console.log(formatJson(run, raw));
+        if (out) {
+          for (const artifact of await client.studio.files(run.workspaceId)) console.log(await client.studio.download(artifact, out));
+        }
+        if (run.status !== 'completed') die(`Research ${run.status}; inspect saved files before continuing.`);
+        return;
+      }
+      if (!out) die('studio run/files requires an explicit --out-dir');
       const artifacts = args[0] === 'run'
-        ? (await client.studio.run(args.slice(1).join(' '), (message) => console.error(message))).artifacts
+        ? (await client.studio.run(args.slice(1).join(' '), (message) => console.error(message), undefined, mode)).artifacts
         : args[0] === 'files' && args[1] ? await client.studio.files(args[1]) : die('Use studio run <brief> or studio files <workspaceId>');
       for (const artifact of artifacts) console.log(await client.studio.download(artifact, out));
       return;
