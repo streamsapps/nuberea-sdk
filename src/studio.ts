@@ -34,7 +34,7 @@ export interface ResearchArtifact {
 }
 export const MAX_STUDIO_ARTIFACT_BYTES = 8 * 1024 * 1024;
 const uuid = (value: string) => {
-  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)) throw new Error('Invalid workspace/run ID');
+  if (!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}(?![\s\S])/i.test(value)) throw new Error('Invalid workspace/run ID');
   return value;
 };
 const record = (value: unknown): value is Record<string, unknown> =>
@@ -68,10 +68,10 @@ export function parseResearchRun(value: unknown): ResearchRun {
   };
 }
 export function parseArtifact(value: unknown): ResearchArtifact {
-  if (!record(value) || typeof value.artifactId !== 'string' || !/^[a-f0-9]{64}$/.test(value.artifactId)
+  if (!record(value) || typeof value.artifactId !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.artifactId)
     || typeof value.workspaceId !== 'string' || typeof value.name !== 'string'
-    || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.(md|csv|json|txt|py|png|jpg|jpeg|pdf|mp4|webm|npy|npz|parquet)$/.test(value.name)
-    || typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(value.sha256)
+    || !/^[A-Za-z0-9][A-Za-z0-9_-]{0,95}\.(md|csv|json|txt|py|png|jpg|jpeg|pdf|mp4|webm|npy|npz|parquet)(?![\s\S])/.test(value.name)
+    || typeof value.sha256 !== 'string' || !/^[a-f0-9]{64}(?![\s\S])/.test(value.sha256)
     || typeof value.size !== 'number' || !Number.isInteger(value.size) || value.size < 0 || value.size > MAX_STUDIO_ARTIFACT_BYTES) {
     throw new Error('Invalid research deliverable manifest');
   }
@@ -107,7 +107,7 @@ export class StudioClient {
     const selectedMode = options.mode ?? 'auto';
     if (!mode(selectedMode)) throw new Error('Invalid Studio run mode');
     const key = options.idempotencyKey ?? randomUUID();
-    if (!/^[A-Za-z0-9_-]{8,128}$/.test(key)) throw new Error('Invalid research idempotency key');
+    if (!/^[A-Za-z0-9_-]{8,128}(?![\s\S])/.test(key)) throw new Error('Invalid research idempotency key');
     let workspaceId = options.workspaceId;
     if (!workspaceId) {
       const created = await this.request('', { name: goal.trim().slice(0, 100) }, {

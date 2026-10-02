@@ -82,6 +82,10 @@ describe('durable Studio runs', () => {
 describe('Studio local artifact delivery', () => {
   it('validates paths and manifests before any local write', () => {
     expect(() => parseArtifact({ name: '../evil.md' })).toThrow();
+    const artifact = { artifactId: 'a'.repeat(64), workspaceId, name: 'plot.png', sha256: 'b'.repeat(64), size: 8 };
+    for (const field of ['name', 'artifactId', 'sha256', 'workspaceId'] as const) {
+      expect(() => parseArtifact({ ...artifact, [field]: `${artifact[field]}\n` })).toThrow();
+    }
     expect(() => new StudioClient(async () => 'token', 'http://evil.test')).toThrow();
   });
   it('verifies checksum, writes only an approved filename and never overwrites or executes', async () => {
