@@ -62,6 +62,12 @@ const reference = await client.research.importGoogleDriveReference(
   googleDriveAccessToken,
 );
 
+const localReference = await client.research.importDeviceReference(
+  'notes.txt',
+  'text/plain',
+  new TextEncoder().encode('Local research notes'),
+);
+
 const response = await client.research.run({
   userMessage: 'Review the attached source.',
   gptModel: '5.6 terra',

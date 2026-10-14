@@ -1,16 +1,28 @@
-export interface ResearchReference {
+interface ResearchReferenceBase {
   referenceId: string;
   name: string;
   mediaType: string;
   size: number;
   sha256: string;
   importedAt: string;
-  provider: 'google_drive';
-  providerFileId: string;
-  providerVersion?: string;
-  providerModifiedAt?: string;
-  providerUrl?: string;
 }
+
+export type ResearchReference = ResearchReferenceBase & (
+  | {
+      provider: 'google_drive';
+      providerFileId: string;
+      providerVersion?: string;
+      providerModifiedAt?: string;
+      providerUrl?: string;
+    }
+  | {
+      provider: 'device';
+      providerFileId?: never;
+      providerVersion?: never;
+      providerModifiedAt?: never;
+      providerUrl?: never;
+    }
+);
 
 export interface ResearchRunRequest {
   userMessage: string;
@@ -71,6 +83,25 @@ export class ResearchClient {
         'X-Google-Drive-Token': googleAccessToken,
       },
       body: JSON.stringify({ fileId }),
+    });
+    return ((await response.json()) as { reference: ResearchReference }).reference;
+  }
+
+  async importDeviceReference(
+    name: string,
+    mediaType: string,
+    content: Uint8Array,
+  ): Promise<ResearchReference> {
+    if (!name.trim()) throw new TypeError('name is required');
+    if (!mediaType.trim()) throw new TypeError('mediaType is required');
+    const response = await this.request('/harness/references/upload', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'X-File-Name': encodeURIComponent(name),
+        'X-File-Media-Type': mediaType,
+      },
+      body: Buffer.from(content),
     });
     return ((await response.json()) as { reference: ResearchReference }).reference;
   }

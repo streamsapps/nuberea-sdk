@@ -42,6 +42,7 @@ describe('ResearchClient', () => {
       getToken: async () => 'nuberea-token',
       fetch: fetcher,
     });
+
     await client.run({
       userMessage: 'Review this.',
       gptModel: '5.6 terra',
@@ -53,6 +54,37 @@ describe('ResearchClient', () => {
     expect(JSON.parse(String(init?.body))).toMatchObject({
       referenceIds: ['a'.repeat(64)],
     });
+  });
+
+  it('uploads a device file through the Research-only binary endpoint', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({
+      reference: {
+        referenceId: 'a'.repeat(64),
+        name: 'notes.txt',
+        mediaType: 'text/plain',
+        size: 5,
+        sha256: 'b'.repeat(64),
+        importedAt: '2026-10-14T00:00:00.000Z',
+        provider: 'device',
+      },
+    }), { status: 201 }));
+    const client = new ResearchClient({
+      baseUrl: 'http://localhost:8000/v1',
+      getToken: async () => 'nuberea-token',
+      fetch: fetcher,
+    });
+    const reference = await client.importDeviceReference(
+      'notes.txt',
+      'text/plain',
+      new TextEncoder().encode('hello'),
+    );
+
+    expect(reference.provider).toBe('device');
+    const [url, init] = fetcher.mock.calls[0]!;
+    expect(url).toBe('http://localhost:8000/v1/harness/references/upload');
+    expect(new Headers(init?.headers).get('x-file-name')).toBe('notes.txt');
+    expect(new Headers(init?.headers).get('x-file-media-type')).toBe('text/plain');
+    expect(Buffer.from(init?.body as Uint8Array).toString()).toBe('hello');
   });
 
   it('does not reuse the SDK OAuth token as a Firebase chat credential', async () => {
