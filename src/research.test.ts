@@ -22,14 +22,14 @@ describe('ResearchClient', () => {
       fetch: fetcher,
     });
 
-    const reference = await client.importGoogleDriveReference(
+    const reference = await client.importGoogleDriveLibraryFile(
       'drive-file-12345',
       'google-token',
     );
     expect(reference.referenceId).toBe('a'.repeat(64));
     expect(fetcher).toHaveBeenCalledOnce();
     const [url, init] = fetcher.mock.calls[0]!;
-    expect(url).toBe('http://localhost:8000/v1/harness/references/google-drive');
+    expect(url).toBe('http://localhost:8000/v1/library/files/google-drive');
     expect(new Headers(init?.headers).get('authorization')).toBe('Bearer nuberea-token');
     expect(new Headers(init?.headers).get('x-google-drive-token')).toBe('google-token');
     expect(init?.body).toBe(JSON.stringify({ fileId: 'drive-file-12345' }));
@@ -46,17 +46,17 @@ describe('ResearchClient', () => {
     await client.run({
       userMessage: 'Review this.',
       gptModel: '5.6 terra',
-      referenceIds: ['a'.repeat(64)],
+      libraryFileIds: ['a'.repeat(64)],
     });
 
     const [url, init] = fetcher.mock.calls[0]!;
     expect(url).toBe('http://localhost:8000/v1/harness/run');
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      referenceIds: ['a'.repeat(64)],
+      libraryFileIds: ['a'.repeat(64)],
     });
   });
 
-  it('uploads a device file through the Research-only binary endpoint', async () => {
+  it('uploads a device file through the file library endpoint', async () => {
     const fetcher = vi.fn(async () => new Response(JSON.stringify({
       reference: {
         referenceId: 'a'.repeat(64),
@@ -73,7 +73,7 @@ describe('ResearchClient', () => {
       getToken: async () => 'nuberea-token',
       fetch: fetcher,
     });
-    const reference = await client.importDeviceReference(
+    const reference = await client.importDeviceLibraryFile(
       'notes.txt',
       'text/plain',
       new TextEncoder().encode('hello'),
@@ -81,7 +81,7 @@ describe('ResearchClient', () => {
 
     expect(reference.provider).toBe('device');
     const [url, init] = fetcher.mock.calls[0]!;
-    expect(url).toBe('http://localhost:8000/v1/harness/references/upload');
+    expect(url).toBe('http://localhost:8000/v1/library/files/upload');
     expect(new Headers(init?.headers).get('x-file-name')).toBe('notes.txt');
     expect(new Headers(init?.headers).get('x-file-media-type')).toBe('text/plain');
     expect(Buffer.from(init?.body as Uint8Array).toString()).toBe('hello');
@@ -92,11 +92,11 @@ describe('ResearchClient', () => {
       accessToken: 'oauth-access-token',
       chatApiUrl: 'http://localhost:8000/v1',
     });
-    await expect(client.research.getReferenceDownloadUrl('a'.repeat(64)))
+    await expect(client.research.getLibraryFileDownloadUrl('a'.repeat(64)))
       .rejects.toThrow('Firebase ID token');
   });
 
-  it('lists, renames, and deletes attachment resources', async () => {
+  it('lists, renames, and deletes library files', async () => {
     const id = 'a'.repeat(64);
     const reference = {
       referenceId: id,
@@ -119,9 +119,9 @@ describe('ResearchClient', () => {
       fetch: fetcher,
     });
 
-    expect(await client.listReferences()).toEqual([reference]);
-    expect((await client.renameReference(id, 'renamed.txt')).name).toBe('renamed.txt');
-    await client.deleteReference(id);
+    expect(await client.listLibraryFiles()).toEqual([reference]);
+    expect((await client.renameLibraryFile(id, 'renamed.txt')).name).toBe('renamed.txt');
+    await client.deleteLibraryFile(id);
     expect(fetcher).toHaveBeenCalledTimes(3);
   });
 });

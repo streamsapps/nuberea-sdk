@@ -44,7 +44,7 @@ const rows = await client.query(`
 console.log(rows.rows);
 ```
 
-### Research references from Google Drive
+### Library files from Google Drive
 
 Drive snapshots are accepted only by NuBerea Research. Obtain a narrow
 `drive.file` Google access token in your application, import the selected file,
@@ -57,12 +57,12 @@ const client = new NuBerea({
   getChatAccessToken: () => firebaseUser.getIdToken(),
 });
 
-const reference = await client.research.importGoogleDriveReference(
+const reference = await client.research.importGoogleDriveLibraryFile(
   googleDriveFileId,
   googleDriveAccessToken,
 );
 
-const localReference = await client.research.importDeviceReference(
+const localReference = await client.research.importDeviceLibraryFile(
   'notes.txt',
   'text/plain',
   new TextEncoder().encode('Local research notes'),
@@ -71,7 +71,7 @@ const localReference = await client.research.importDeviceReference(
 const response = await client.research.run({
   userMessage: 'Review the attached source.',
   gptModel: '5.6 terra',
-  referenceIds: [reference.referenceId],
+  libraryFileIds: [reference.referenceId],
 });
 
 // Research responses are streamed as SSE.

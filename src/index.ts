@@ -35,7 +35,7 @@ export type { CatalogClientConfig } from './catalog.js';
 export { ResearchApiError, ResearchClient } from './research.js';
 export type {
   ResearchClientConfig,
-  ResearchReference,
+  LibraryFile,
   ResearchRunRequest,
 } from './research.js';
 export { McpClient, McpError } from './mcp.js';

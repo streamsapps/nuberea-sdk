@@ -1,4 +1,4 @@
-interface ResearchReferenceBase {
+interface LibraryFileBase {
   referenceId: string;
   name: string;
   mediaType: string;
@@ -8,7 +8,7 @@ interface ResearchReferenceBase {
   expiresAt?: string;
 }
 
-export type ResearchReference = ResearchReferenceBase & (
+export type LibraryFile = LibraryFileBase & (
   | {
       provider: 'google_drive';
       providerFileId: string;
@@ -28,7 +28,7 @@ export type ResearchReference = ResearchReferenceBase & (
 export interface ResearchRunRequest {
   userMessage: string;
   gptModel: string;
-  referenceIds?: string[];
+  libraryFileIds?: string[];
   previous_response_id?: string | null;
   enabledCollections?: string[];
   workflowMode?: string | null;
@@ -67,17 +67,17 @@ export class ResearchClient {
     this.fetcher = config.fetch ?? fetch;
   }
 
-  async importGoogleDriveReference(
+  async importGoogleDriveLibraryFile(
     fileId: string,
     googleAccessToken: string,
-  ): Promise<ResearchReference> {
+  ): Promise<LibraryFile> {
     if (!/^[A-Za-z0-9_-]{10,200}$/.test(fileId)) {
       throw new TypeError('fileId must be a Google Drive file identifier');
     }
     if (!googleAccessToken || /\s/.test(googleAccessToken)) {
       throw new TypeError('googleAccessToken is required');
     }
-    const response = await this.request('/harness/references/google-drive', {
+    const response = await this.request('/library/files/google-drive', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -85,17 +85,17 @@ export class ResearchClient {
       },
       body: JSON.stringify({ fileId }),
     });
-    return ((await response.json()) as { reference: ResearchReference }).reference;
+    return ((await response.json()) as { reference: LibraryFile }).reference;
   }
 
-  async importDeviceReference(
+  async importDeviceLibraryFile(
     name: string,
     mediaType: string,
     content: Uint8Array,
-  ): Promise<ResearchReference> {
+  ): Promise<LibraryFile> {
     if (!name.trim()) throw new TypeError('name is required');
     if (!mediaType.trim()) throw new TypeError('mediaType is required');
-    const response = await this.request('/harness/references/upload', {
+    const response = await this.request('/library/files/upload', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/octet-stream',
@@ -104,42 +104,42 @@ export class ResearchClient {
       },
       body: Buffer.from(content),
     });
-    return ((await response.json()) as { reference: ResearchReference }).reference;
+    return ((await response.json()) as { reference: LibraryFile }).reference;
   }
 
-  async getReferenceDownloadUrl(referenceId: string): Promise<string> {
+  async getLibraryFileDownloadUrl(referenceId: string): Promise<string> {
     if (!/^[a-f0-9]{64}$/.test(referenceId)) {
       throw new TypeError('referenceId must be a 64-character SHA-256 identifier');
     }
     const response = await this.request(
-      `/harness/references/${encodeURIComponent(referenceId)}/download`,
+      `/library/files/${encodeURIComponent(referenceId)}/download`,
     );
     return ((await response.json()) as { url: string }).url;
   }
 
-  async listReferences(): Promise<ResearchReference[]> {
-    const response = await this.request('/harness/references');
-    return ((await response.json()) as { items: ResearchReference[] }).items;
+  async listLibraryFiles(): Promise<LibraryFile[]> {
+    const response = await this.request('/library/files');
+    return ((await response.json()) as { items: LibraryFile[] }).items;
   }
 
-  async renameReference(referenceId: string, fileName: string): Promise<ResearchReference> {
+  async renameLibraryFile(referenceId: string, fileName: string): Promise<LibraryFile> {
     if (!/^[a-f0-9]{64}$/.test(referenceId)) {
       throw new TypeError('referenceId must be a 64-character SHA-256 identifier');
     }
     if (!fileName.trim()) throw new TypeError('fileName is required');
-    const response = await this.request(`/harness/references/${referenceId}`, {
+    const response = await this.request(`/library/files/${referenceId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ file_name: fileName }),
     });
-    return response.json() as Promise<ResearchReference>;
+    return response.json() as Promise<LibraryFile>;
   }
 
-  async deleteReference(referenceId: string): Promise<void> {
+  async deleteLibraryFile(referenceId: string): Promise<void> {
     if (!/^[a-f0-9]{64}$/.test(referenceId)) {
       throw new TypeError('referenceId must be a 64-character SHA-256 identifier');
     }
-    await this.request(`/harness/references/${referenceId}`, { method: 'DELETE' });
+    await this.request(`/library/files/${referenceId}`, { method: 'DELETE' });
   }
 
   /**
