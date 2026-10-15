@@ -95,4 +95,33 @@ describe('ResearchClient', () => {
     await expect(client.research.getReferenceDownloadUrl('a'.repeat(64)))
       .rejects.toThrow('Firebase ID token');
   });
+
+  it('lists, renames, and deletes attachment resources', async () => {
+    const id = 'a'.repeat(64);
+    const reference = {
+      referenceId: id,
+      name: 'notes.txt',
+      mediaType: 'text/plain',
+      size: 5,
+      sha256: 'b'.repeat(64),
+      importedAt: '2026-10-14T00:00:00.000Z',
+      expiresAt: '2026-11-13T00:00:00.000Z',
+      provider: 'device' as const,
+    };
+    const fetcher = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      if (init?.method === 'DELETE') return new Response(null, { status: 204 });
+      if (init?.method === 'PATCH') return new Response(JSON.stringify({ ...reference, name: 'renamed.txt' }));
+      return new Response(JSON.stringify({ items: [reference], cursor: null }));
+    });
+    const client = new ResearchClient({
+      baseUrl: 'http://localhost:8000/v1',
+      getToken: async () => 'nuberea-token',
+      fetch: fetcher,
+    });
+
+    expect(await client.listReferences()).toEqual([reference]);
+    expect((await client.renameReference(id, 'renamed.txt')).name).toBe('renamed.txt');
+    await client.deleteReference(id);
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
 });

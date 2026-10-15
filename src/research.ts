@@ -5,6 +5,7 @@ interface ResearchReferenceBase {
   size: number;
   sha256: string;
   importedAt: string;
+  expiresAt?: string;
 }
 
 export type ResearchReference = ResearchReferenceBase & (
@@ -114,6 +115,31 @@ export class ResearchClient {
       `/harness/references/${encodeURIComponent(referenceId)}/download`,
     );
     return ((await response.json()) as { url: string }).url;
+  }
+
+  async listReferences(): Promise<ResearchReference[]> {
+    const response = await this.request('/harness/references');
+    return ((await response.json()) as { items: ResearchReference[] }).items;
+  }
+
+  async renameReference(referenceId: string, fileName: string): Promise<ResearchReference> {
+    if (!/^[a-f0-9]{64}$/.test(referenceId)) {
+      throw new TypeError('referenceId must be a 64-character SHA-256 identifier');
+    }
+    if (!fileName.trim()) throw new TypeError('fileName is required');
+    const response = await this.request(`/harness/references/${referenceId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_name: fileName }),
+    });
+    return response.json() as Promise<ResearchReference>;
+  }
+
+  async deleteReference(referenceId: string): Promise<void> {
+    if (!/^[a-f0-9]{64}$/.test(referenceId)) {
+      throw new TypeError('referenceId must be a 64-character SHA-256 identifier');
+    }
+    await this.request(`/harness/references/${referenceId}`, { method: 'DELETE' });
   }
 
   /**
