@@ -32,6 +32,12 @@ export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
 export type { CatalogClientConfig } from './catalog.js';
+export { ResearchApiError, ResearchClient } from './research.js';
+export type {
+  ResearchClientConfig,
+  LibraryFile,
+  ResearchRunRequest,
+} from './research.js';
 export { McpClient, McpError } from './mcp.js';
 export type {
   McpClientConfig,
