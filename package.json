@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@types/keytar": "^4.4.2",
-    "@types/node": "^22.0.0",
+    "@types/node": "^26.6.6",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^5.1.0"
