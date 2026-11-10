@@ -1,6 +1,8 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MCP_ENDPOINTS, resolveMcpUrl } from './auth.js';
 import { NuBerea } from './client.js';
+import { McpClient } from './mcp.js';
 import { defaultTokenFile, tokenStoreAccount } from './storage.js';
 
 describe('MCP endpoint resolution', () => {
@@ -27,6 +29,34 @@ describe('NuBerea MCP requests', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+  });
+
+  it('reports the package version during MCP initialization', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        result: {
+          protocolVersion: '2025-03-26',
+          serverInfo: { name: 'test', version: '1.0.0' },
+          capabilities: {},
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new McpClient({
+      mcpUrl: MCP_ENDPOINTS.production,
+      accessToken: 'token',
+    });
+
+    await client.initialize();
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const { version } = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+    expect(JSON.parse(request.body as string).params.clientInfo).toEqual({
+      name: '@nuberea/sdk',
+      version,
+    });
   });
 
   it('sends MCP tool calls to the production MCP host by default', async () => {
