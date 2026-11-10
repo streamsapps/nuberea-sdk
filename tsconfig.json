@@ -6,6 +6,7 @@
     "outDir": "dist",
     "rootDir": "src",
     "strict": true,
+    "types": ["node"],
     "noImplicitAny": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
