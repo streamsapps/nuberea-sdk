@@ -163,7 +163,7 @@ export class McpClient {
       protocolVersion: this.protocolVersion,
       clientInfo: {
         name: '@nuberea/sdk',
-        version: '0.1.0',
+        version: '0.1.6',
       },
       capabilities: {},
     });
