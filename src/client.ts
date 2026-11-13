@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import { ResearchClient } from './research.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -33,6 +34,12 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
+  /** Chat API base URL used by Research mode. */
+  chatApiUrl?: string;
+  /** Firebase ID token accepted by the chat API (distinct from SDK OAuth). */
+  chatAccessToken?: string;
+  /** Refreshable Firebase ID token provider for browser/mobile integrations. */
+  getChatAccessToken?: () => Promise<string>;
 }
 
 export type NuBereaTokens = {
@@ -42,6 +49,7 @@ export type NuBereaTokens = {
 };
 
 const DEFAULT_BASE = 'https://auth.nuberea.com';
+const DEFAULT_CHAT_API = 'https://api.nuberea.com/v1';
 
 export class NuBerea {
   private auth: NuBereaAuth;
@@ -50,6 +58,10 @@ export class NuBerea {
   private staticToken: string | undefined;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
+  private researchClient: ResearchClient | null = null;
+  private chatApiUrl: string;
+  private chatAccessToken: string | undefined;
+  private getChatAccessToken: (() => Promise<string>) | undefined;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl =
@@ -63,6 +75,12 @@ export class NuBerea {
       ?? process.env.NUBEREA_MCP_URL
       ?? resolveMcpUrl(this.baseUrl);
     this.staticToken = config?.accessToken;
+    this.chatApiUrl =
+      config?.chatApiUrl
+      ?? process.env.NUBEREA_CHAT_API_URL
+      ?? DEFAULT_CHAT_API;
+    this.chatAccessToken = config?.chatAccessToken;
+    this.getChatAccessToken = config?.getChatAccessToken;
 
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
@@ -133,7 +151,29 @@ export class NuBerea {
         getToken: () => this.getToken(),
       });
     }
+
     return this.catalogClient;
+  }
+
+  /**
+   * Access Research-only chat APIs, including Google Drive reference import.
+   * Standard chat, plan, and agent endpoints intentionally do not accept these
+   * reference IDs.
+   */
+  get research(): ResearchClient {
+    if (!this.researchClient) {
+      this.researchClient = new ResearchClient({
+        baseUrl: this.chatApiUrl,
+        getToken: async () => {
+          if (this.getChatAccessToken) return this.getChatAccessToken();
+          if (this.chatAccessToken) return this.chatAccessToken;
+          throw new Error(
+            'Research APIs require chatAccessToken or getChatAccessToken with a Firebase ID token.',
+          );
+        },
+      });
+    }
+    return this.researchClient;
   }
 
   /**
