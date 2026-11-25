@@ -33,6 +33,8 @@ export interface AuthConfig {
   tokenFile: string;
   /** Login page URL for browser-based sign-in */
   loginUrl: string;
+  /** Add openid/email when requesting userinfo. Default preserves MCP-only consent. */
+  scopes?: string[];
 }
 
 /** Tokens kept in memory and persisted to keychain/file (no login credentials). */
@@ -77,6 +79,7 @@ const DEFAULT_CONFIG: AuthConfig = {
   firebaseAuthPort: 9875,
   tokenFile: defaultTokenFile(),
   loginUrl: 'https://nuberea.com/login',
+  scopes: ['mcp'],
 };
 
 export class NuBereaAuth {
@@ -142,7 +145,7 @@ export class NuBereaAuth {
    */
   async login(): Promise<StoredTokens> {
     const fbToken = await this.getFirebaseIdToken();
-    const { verifier, challenge } = generatePkce();
+    const { verifier, challenge } = createPkce();
     const code = await this.fetchAuthCode(fbToken, challenge);
     const tokenResponse = await this.exchangeCode(code, verifier);
 
@@ -280,7 +283,7 @@ export class NuBereaAuth {
         code_challenge: challenge,
         code_challenge_method: 'S256',
         state: crypto.randomBytes(8).toString('hex'),
-        scope: 'mcp',
+        scope: this.config.scopes?.join(' ') ?? 'mcp',
         resource: this.config.mcpUrl,
       });
 
@@ -345,7 +348,7 @@ interface TokenResponse {
   expires_in: number;
 }
 
-function generatePkce(): { verifier: string; challenge: string } {
+export function createPkce(): { verifier: string; challenge: string } {
   const verifier = crypto.randomBytes(32).toString('base64url');
   const challenge = crypto.createHash('sha256').update(verifier).digest('base64url');
   return { verifier, challenge };

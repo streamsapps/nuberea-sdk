@@ -8,6 +8,9 @@
 import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
 import { ChatClient, resolveChatBaseUrl, type ChatRequest, type ChatOptions, type ChatResponse } from './chat.js';
+import { AgentClient } from './agent.js';
+import { StudyClient } from './study.js';
+import { OAuthClient } from './oauth.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -34,9 +37,9 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
-  /** Chat REST base, including /v1. Defaults to the API host matching baseUrl. */
+  /** Chat/agent REST base, including /v1. Defaults to the API host matching baseUrl. */
   chatBaseUrl?: string;
-  /** Firebase ID token for chat only; never used as an MCP OAuth token. */
+  /** Firebase ID token for chat, agents and Study; never an MCP OAuth token. */
   firebaseIdToken?: string;
   /** Supply refreshed Firebase credentials, e.g. () => user.getIdToken(). */
   getFirebaseIdToken?: () => Promise<string>;
@@ -58,6 +61,10 @@ export class NuBerea {
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
   private chatClient: ChatClient | undefined;
+  private agentClient: AgentClient | undefined;
+  private studyClient: StudyClient | undefined;
+  private oauthClient: OAuthClient | undefined;
+  private readonly oauthBaseUrl: string;
   private readonly chatBaseUrl: string | undefined;
   private readonly firebaseTokenProvider: (() => Promise<string>) | undefined;
   private firebaseIdToken: string | undefined;
@@ -77,6 +84,7 @@ export class NuBerea {
     this.firebaseIdToken = config?.firebaseIdToken;
     this.chatBaseUrl = config?.chatBaseUrl;
     this.firebaseTokenProvider = config?.getFirebaseIdToken;
+    this.oauthBaseUrl = config?.auth?.oauthBaseUrl ?? this.baseUrl;
 
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
@@ -132,14 +140,38 @@ export class NuBerea {
     return this.auth.getAccessToken();
   }
 
+  private getFirebaseToken(): Promise<string> {
+    if (this.firebaseTokenProvider) return this.firebaseTokenProvider();
+    if (this.firebaseIdToken) return Promise.resolve(this.firebaseIdToken);
+    return this.auth.getFirebaseIdToken();
+  }
+
   /** Send a normal chat turn, stream typed activity callbacks, and return the complete done payload. */
   async chat(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResponse> {
     this.chatClient ??= new ChatClient(
-      () => this.firebaseTokenProvider ? this.firebaseTokenProvider()
-        : this.firebaseIdToken ? Promise.resolve(this.firebaseIdToken) : this.auth.getFirebaseIdToken(),
+      () => this.getFirebaseToken(),
       this.chatBaseUrl ?? resolveChatBaseUrl(this.baseUrl),
     );
     return this.chatClient.send(request, options);
+  }
+
+  get agent(): AgentClient {
+    return this.agentClient ??= new AgentClient(
+      () => this.getFirebaseToken(), this.chatBaseUrl ?? resolveChatBaseUrl(this.baseUrl),
+    );
+  }
+
+  get study(): StudyClient {
+    return this.studyClient ??= new StudyClient(() => this.getFirebaseToken(), new URL(this.mcpUrl).origin);
+  }
+
+  /** Low-level standard OAuth/OIDC routes; token results are not automatically persisted. */
+  get oauth(): OAuthClient {
+    return this.oauthClient ??= new OAuthClient({
+      baseUrl: this.oauthBaseUrl,
+      getAccessToken: () => this.getToken(),
+      getFirebaseIdToken: () => this.getFirebaseToken(),
+    });
   }
 
   // ==========================================================================
@@ -204,6 +236,11 @@ export class NuBerea {
     return res.result;
   }
 
+  async mcpNotify(method: string, params?: Record<string, unknown>): Promise<void> {
+    const mcp = await this.getMcpClient();
+    return mcp.notify(method, params);
+  }
+
   /**
    * List available MCP resources.
    */
@@ -224,6 +261,11 @@ export class NuBerea {
   async resource(uri: string): Promise<McpResourceContent[]> {
     const mcp = await this.getMcpClient();
     return mcp.readResource(uri);
+  }
+
+  async resourceTemplates() {
+    const mcp = await this.getMcpClient();
+    return mcp.listResourceTemplates();
   }
 
   /**

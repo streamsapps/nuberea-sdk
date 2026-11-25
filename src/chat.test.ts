@@ -44,7 +44,7 @@ afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 describe('native SDK chat', () => {
   it('uses the production chat endpoint, preserves the full request and separates Firebase from OAuth credentials', async () => {
     const fullRequest: ChatRequest = {
-      ...request, previous_response_id: 'resp_previous', conversationId: '12345678-1234-4234-8234-123456789012',
+      ...request, previous_response_id: 'resp_previous',
       enabledCollections: ['bible'], workflowMode: 'read', reasoning: { effort: 'medium', mode: null },
       responseFormat: 'nuberea-rich',
       passageContext: {
@@ -167,7 +167,8 @@ describe('native SDK chat', () => {
     }
     await expect(client.send({ ...request, userMessage: 'x'.repeat(15 * 1024 * 1024) }))
       .rejects.toThrow('15 MiB');
-    await expect(client.send({ ...request, conversationId: 'not-a-uuid' })).rejects.toBeInstanceOf(ChatError);
+    await expect(Reflect.apply(client.send, client, [{ ...request, conversationId: '12345678-1234-4234-8234-123456789012' }]))
+      .rejects.toBeInstanceOf(ChatError);
     expect(getToken).not.toHaveBeenCalled();
   });
 

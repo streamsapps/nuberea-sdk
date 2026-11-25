@@ -241,12 +241,13 @@ selection (including a routing timeout or low-confidence fallback) means no
 skill event and no final skill metadata. Frame revision requires a follow-up.
 Skill metadata reports applied advisory instructions, not an executed MCP tool.
 
-All current chat fields are supported: model, prior response ID, conversation ID,
-collections, workflow, reasoning, passage context (including edition-native
-reader targets), and `markdown` / `nuberea-rich` response formats. A managed video
-conversation uses a UUID `conversationId`; its answer and skill events are
-withheld until source validation succeeds. The server enforces plan restrictions
-and rate limits.
+The SDK supports the read-only conversation-data subset: model, prior provider
+response ID, collections, workflow, reasoning, passage context and response format.
+`conversationId` and unrecognized request fields are rejected before credential
+or network work. Managed-conversation modes can commit Firebase history/revisions,
+including during planning, so those modes are not exposed here. This restriction
+concerns Firebase conversation data, not provider response state, authentication
+maintenance or AWS-backed quotas.
 
 File uploads require NuBerea Plus. Chat accepts request-scoped `attachments` with exactly `name`, `mediaType`,
 and `contentBase64`. Supported media types are PDF, plain text, Markdown, JSON,
@@ -307,36 +308,110 @@ nuberea chat '{"gptModel":"5.6 terra","userMessage":"Audit this inference: every
 The REST contract is available at [API documentation](https://nuberea.com/docs/api/)
 and [OpenAPI JSON](https://nuberea.com/openapi.json).
 
-## Available Databases
+## Agent planning and execution
 
-| Schema | Table | Description | Rows |
-|---|---|---|---|
-| `hebrew` | `morphemes` | Hebrew Bible morphological analysis | 467,770 |
-| `greek` | `morphemes` | Greek NT morphological analysis | 137,741 |
-| `lxx` | `morphemes` | Septuagint morphological analysis | 623,693 |
-| `lsj` | `entries` | Liddell-Scott-Jones Greek Lexicon | 119,553 |
-| `bdb` | `entries` | Brown-Driver-Briggs Hebrew Lexicon | 10,221 |
-| `abbott_smith` | `entries` | Abbott-Smith NT Greek Lexicon | 555 |
-| `kjv` | `verses` | King James Version Bible text | 36,821 |
-| `cntr` | `transcriptions` | Greek NT manuscript transcriptions | 41,956 |
-| `aland` | `pericopes` | Synoptic parallel pericopes | 330 |
+```ts
+const planned = await client.agent.plan({
+  gptModel: '5.6 terra',
+  userMessage: 'Plan a concise assessment of the supplied claims.',
+  enabledCollections: [],
+}, {
+  onThinking: ({ message }) => console.error(message),
+  onPlan: (result) => console.log(result.plan),
+  onNeedsInput: ({ inputRequests }) => console.log(inputRequests),
+});
 
-## Available MCP Tools
+// After explicit user approval and answering any planned.inputRequests:
+const answer = await client.agent.run({
+  gptModel: '5.6 terra',
+  userMessage: 'Assess the supplied claims.',
+  plan: planned.plan,
+  maxTurns: 4,
+  enabledCollections: [],
+}, {
+  onChunk: (chunk) => process.stdout.write(chunk),
+  onStep: (step) => console.error(step),
+});
+```
 
-55+ tools organized by collection:
+Both agent routes require Plus. Planning is SSE, not ordinary JSON: the SDK
+handles `thinking`, `plan`, `needs_input` and terminal `done`. Execution also
+handles tool and step activity. Both accept ephemeral attachments and reject
+managed `conversationId` modes. Plan response IDs may be null for private
+evidence. There is no automatic approval, execution or retry.
 
-- **`bible_kjv_*`** — KJV Bible text (get_verse, get_chapter, search_text, ...)
-- **`macula_hebrew_*`** — Hebrew morphology (query_verse, search_lemma, search_strong, ...)
-- **`macula_greek_*`** — Greek NT morphology
-- **`macula_lxx_*`** — Septuagint morphology
-- **`lexicon_lsj_*`** — LSJ Greek lexicon (lookup, search, search_latin, ...)
-- **`lexicon_bdb_*`** — BDB Hebrew lexicon
-- **`lexicon_abbott_smith_*`** — Abbott-Smith lexicon
-- **`transcription_cntr_*`** — CNTR manuscripts
-- **`synoptic_*`** — Synoptic parallels
-- **`analytics_*`** — SQL queries, schema introspection
+## Native Study
 
-Run `nuberea tools` to see the full list.
+```ts
+const passage = await client.study.verse({
+  corpus: 'greek', book: 'John', chapter: 1, verse: 1,
+});
+const dictionary = await client.study.greekLexicon({ lemma: 'λόγος' });
+const domain = await client.study.greekSemanticDomain('033');
+```
+
+These read-only GETs use the MCP host but require a Firebase ID token and paid
+access. They do not invoke an LLM or substitute fixtures on failure. Corpora
+are Greek, Hebrew, LXX and feature-gated Latin. Chapter/verse bounds are 1–150 /
+1–200. Preserve token identity (Hebrew morphemes can share a ref), attribution,
+machine-annotation status and the lexical-candidate/sense boundary.
+
+## Client-driven MCP discovery
+
+Use `client.tools()`, `client.mcpRequest('tools/list')`, `client.resources()` and
+`client.resourceTemplates()` to discover current caller-visible schemas.
+Invoke a selected tool with `client.tool(name, args)`; read a resource with
+`client.resource(uri)`. Tools/resources vary by deployment, entitlement and
+tenant; the SDK/spec deliberately does not enumerate the discovered catalog.
+Tool metadata includes `outputSchema`; results retain `structuredContent` and
+`_meta`. `mcpNotify` sends notifications without a request ID. MCP is
+sessionless; `close()` clears local state, not a server session.
+
+## Standard OAuth/OIDC APIs
+
+```ts
+const metadata = await client.oauth.metadata();
+const openid = await client.oauth.metadata('openid');
+const publicKeys = await client.oauth.jwks();
+const resource = await client.oauth.protectedResource();
+```
+
+Discovery does not trigger login or send a bearer token. Low-level
+`oauth.authorize`, `oauth.token`, `oauth.register` and `oauth.userinfo` expose
+standard routes; partner, health and platform-verification APIs are excluded.
+Use `createPkce()` for a verifier/challenge. Authorization requires S256,
+explicit state/resource, sends Firebase credentials only to the auth host,
+does not follow redirects, and verifies returned target/state/issuer.
+Token calls are form-encoded public-client code/refresh grants, return
+credentials to the caller, and do not change cached SDK login state.
+Never automatically retry an uncertain rotating refresh-token exchange.
+
+`userinfo` requires `openid`; email additionally requires `email`. Configure
+`auth: { scopes: ['mcp', 'openid', 'email'] }` before browser login to request
+those scopes. Default consent remains MCP-only. Userinfo supports GET/POST
+through its `method` option.
+
+The current registration endpoint returns RFC-style metadata without durable
+client-registration persistence; the returned client-management URI is not
+an implemented management endpoint. The SDK does not auto-register clients.
+
+All tenant APIs remain available through `client.catalog`, including AWS-backed
+management mutations. HF creation/testing supports `relations`; updates support
+`hfResource`. Only missing AWS trust (404) becomes null. Other access/service
+failures and 422 verification failures remain explicit `ApiError` values with
+status, code and details.
+
+### Synchronizing the REST specification
+
+```sh
+npm run build
+node scripts/sync-openapi.mjs /path/to/nuberea-web/src/data/openapi.json
+```
+
+This exports shared SDK schemas and selected route contracts, using separate
+operation-level hosts/security schemes for chat/agents, Study, MCP/catalog and
+OAuth. Firebase conversation persistence, partner/health APIs, billing and
+discovered tool catalogs are excluded.
 
 ## Configuration
 

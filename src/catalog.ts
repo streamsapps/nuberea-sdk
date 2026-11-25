@@ -44,6 +44,7 @@ import type {
   ValidateResult,
   VerifyResult,
 } from './types.js';
+import { RestClient, ApiError } from './http.js';
 
 export interface CatalogClientConfig {
   /** Base URL of the NuBerea MCP host (control plane is served under `/v1`). */
@@ -54,57 +55,23 @@ export interface CatalogClientConfig {
 
 const enc = encodeURIComponent;
 
-function getErrorDetail(data: unknown): string | undefined {
-  if (typeof data === 'string') {
-    const detail = data.trim();
-    return detail && !detail.startsWith('<') ? detail : undefined;
-  }
-  if (!data || typeof data !== 'object') return undefined;
-
-  const response = data as { error?: unknown; message?: unknown; code?: unknown };
-  const message = typeof response.message === 'string'
-    ? response.message
-    : typeof response.error === 'string'
-      ? response.error
-      : undefined;
-  const code = typeof response.code === 'string' ? response.code : undefined;
-
-  if (code && message && code !== message) return `${code}: ${message}`;
-  return message ?? code;
-}
-
 export class CatalogClient {
-  constructor(private readonly config: CatalogClientConfig) {}
+  private readonly rest: RestClient;
+  constructor(config: CatalogClientConfig) {
+    this.rest = new RestClient(config.baseUrl, config.getToken);
+  }
 
   // --------------------------------------------------------------- transport
   private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
-    const token = await this.config.getToken();
-    const res = await fetch(`${this.config.baseUrl}${path}`, {
-      method,
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: body !== undefined ? JSON.stringify(body) : undefined,
-    });
-
-    const text = await res.text();
-    let data: unknown = undefined;
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = text;
-      }
+    try {
+      return await this.rest.request(method, path, body) as T;
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status === undefined) throw error;
+      const prefix = `${method} ${path} failed (HTTP ${error.status})`;
+      if (error.message.startsWith(prefix)) throw error;
+      const detail = error.code && error.code !== error.message ? `${error.code}: ${error.message}` : error.message;
+      throw new ApiError(`${prefix}: ${detail}`, error.code, error.status, error.details);
     }
-
-    if (!res.ok) {
-      const detail = getErrorDetail(data);
-      throw new Error(
-        `${method} ${path} failed (HTTP ${res.status})${detail ? `: ${detail}` : ''}`,
-      );
-    }
-    return data as T;
   }
 
   // ----------------------------------------------------------------- tenants
@@ -137,8 +104,9 @@ export class CatalogClient {
   async getAwsTrust(tenantId: string): Promise<AwsTrust | null> {
     try {
       return await this.request<AwsTrust>('GET', `/v1/tenants/${enc(tenantId)}/trust/aws`);
-    } catch {
-      return null;
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) return null;
+      throw error;
     }
   }
 
@@ -215,6 +183,7 @@ export class CatalogClient {
       repo: params.repo,
       tableName: params.tableName,
       files: params.files ?? [],
+      ...(params.relations ? { relations: params.relations } : {}),
       auth: params.auth ?? 'public',
       ...(params.revision ? { revision: params.revision } : {}),
       // Seeds the tenant HF identity when unset; ignored once one exists.

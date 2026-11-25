@@ -81,10 +81,10 @@ describe('NuBerea MCP requests', () => {
   });
 
   it('does not retain a session ID returned by an MCP server', async () => {
-    const fetchMock = vi.fn().mockImplementation(async () =>
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) =>
       new Response(JSON.stringify({
         jsonrpc: '2.0',
-        id: 1,
+        id: JSON.parse(init.body).id,
         result: { content: [] },
       }), {
         status: 200,
@@ -104,6 +104,16 @@ describe('NuBerea MCP requests', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const secondRequest = fetchMock.mock.calls[1]?.[1] as RequestInit;
     expect(secondRequest.headers).not.toHaveProperty('mcp-session-id');
+  });
+
+  it('rejects mismatched MCP response IDs and failed notifications instead of accepting transport-shaped successes', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
+      jsonrpc: '2.0', id: 999, result: {},
+    }))).mockResolvedValueOnce(new Response('Denied', { status: 403 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new NuBerea({ accessToken: 'token' });
+    await expect(client.mcpRequest('ping')).rejects.toThrow('mismatched');
+    await expect(client.mcpNotify('notifications/initialized')).rejects.toThrow('403');
   });
 
   it('loads the stateless tool list from the production MCP host', async () => {

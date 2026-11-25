@@ -46,6 +46,15 @@ export interface McpResourceContent {
   blob?: string;
 }
 
+export interface McpResourceTemplate {
+  uriTemplate: string;
+  name: string;
+  title?: string;
+  description?: string;
+  mimeType?: string;
+  _meta?: Record<string, unknown>;
+}
+
 export interface McpJsonRpcRequest {
   jsonrpc: '2.0';
   method: string;
@@ -116,6 +125,7 @@ export class McpClient {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      redirect: 'error',
     });
 
     if (!res.ok) {
@@ -125,7 +135,12 @@ export class McpClient {
 
     // Parse response (may be SSE or plain JSON)
     const text = await res.text();
-    return this.parseResponse(text, res.headers.get('content-type') ?? '');
+    const response = this.parseResponse(text, res.headers.get('content-type') ?? '');
+    if (response.jsonrpc !== '2.0' || response.id !== id
+      || (Object.hasOwn(response, 'result') === Object.hasOwn(response, 'error'))) {
+      throw new McpError('Invalid or mismatched MCP JSON-RPC response', -32603);
+    }
+    return response;
   }
 
   /**
@@ -144,11 +159,13 @@ export class McpClient {
       ...(params ? { params } : {}),
     };
 
-    await fetch(this.mcpUrl, {
+    const response = await fetch(this.mcpUrl, {
       method: 'POST',
       headers,
       body: JSON.stringify(body),
+      redirect: 'error',
     });
+    if (!response.ok) throw new McpError(`MCP notification failed: HTTP ${response.status}`, response.status);
   }
 
   // ==========================================================================
@@ -219,6 +236,12 @@ export class McpClient {
 
     const result = res.result as { resources: McpResource[] };
     return result.resources;
+  }
+
+  async listResourceTemplates(): Promise<McpResourceTemplate[]> {
+    const response = await this.request('resources/templates/list');
+    if (response.error) throw new McpError(response.error.message, response.error.code);
+    return (response.result as { resourceTemplates: McpResourceTemplate[] }).resourceTemplates;
   }
 
   /**

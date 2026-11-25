@@ -10,11 +10,16 @@ export interface ToolInfo {
   name: string;
   description?: string;
   inputSchema?: Record<string, unknown>;
+  outputSchema?: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
 }
 
 export interface ToolResult {
   content: Array<{ type: string; text: string }>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
+  _meta?: Record<string, unknown>;
 }
 
 // ============================================================================
@@ -92,6 +97,7 @@ export type HfAuthMode = 'public' | 'gated';
 /** The org-level unit a federated grant belongs to. */
 export interface Tenant {
   tenantId: string;
+  subjectId?: string;
   displayName: string;
   tier?: string;
   ownerSubjects: string[];
@@ -163,6 +169,7 @@ export interface HfDatasetConnector {
   revision?: string;
   files: string[];
   tableName: string;
+  relations?: HfRelation[];
   auth: HfAuthMode;
   status: ConnectorStatus;
   createdAt: string;
@@ -229,6 +236,7 @@ export interface HfConnectorUpdate {
   auth?: HfAuthMode;
   revision?: string;
   files?: string[];
+  hfResource?: string;
 }
 
 export type CatalogConnector = GlueAthenaConnector | HfDatasetConnector;
@@ -245,6 +253,7 @@ export interface HfConnectorInput {
   repo: string;
   tableName: string;
   files?: string[];
+  relations?: HfRelation[];
   auth?: HfAuthMode;
   revision?: string;
   /**
@@ -253,6 +262,11 @@ export interface HfConnectorInput {
    * change the account, use `setHfIdentity`.
    */
   hfResource?: string;
+}
+
+export interface HfRelation {
+  name: string;
+  files: string[];
 }
 
 export interface ScopedTable {

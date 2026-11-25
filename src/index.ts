@@ -28,7 +28,7 @@
 
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
-export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
+export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl, createPkce } from './auth.js';
 export {
   ChatClient, ChatError, ChatRequestSchema, ChatResponseSchema, ReasoningSkillUsageSchema,
   ScriptureReaderTargetSchema, ToolCallRecordSchema, resolveChatBaseUrl,
@@ -38,6 +38,22 @@ export type {
   ChatRequest, ChatResponse, ChatOptions, ChatThinking, ReasoningSkillUsage, ToolCallRecord, ScriptureReaderTarget,
   ChatAttachment,
 } from './chat.js';
+export { AgentClient, AgentPlanRequestSchema, AgentRunRequestSchema, AgentPlanResponseSchema,
+  PlanSchema, PlanStepSchema, PlanInputRequestSchema, AgentNeedsInputSchema, AgentStepUpdateSchema } from './agent.js';
+export type { AgentPlan, AgentPlanRequest, AgentRunRequest, AgentPlanResponse,
+  AgentNeedsInput, AgentStepUpdate, AgentPlanOptions, AgentRunOptions } from './agent.js';
+export { StudyClient, StudyReferenceSchema, GreekLexiconRequestSchema, SemanticDomainRequestSchema,
+  VerseStudySchema, GreekLexiconStudySchema, GreekSemanticDomainStudySchema, StudyNodeSchema,
+  StudyWordSchema, StudyTokenSchema, UbsGreekMeaningSchema, LsjEntrySchema } from './study.js';
+export type { StudyReference, VerseStudy, GreekLexiconRequest, GreekLexiconStudy,
+  GreekSemanticDomainStudy, UbsGreekMeaning } from './study.js';
+export { OAuthClient, AuthorizeRequestSchema, OAuthTokenRequestSchema, OAuthTokenResponseSchema,
+  OAuthRegistrationRequestSchema, OAuthRegistrationResponseSchema, OAuthMetadataSchema,
+  OAuthUserInfoSchema, ProtectedResourceMetadataSchema, JwksSchema } from './oauth.js';
+export type { OAuthClientConfig, AuthorizeRequest, AuthorizationCode, OAuthTokenRequest,
+  OAuthTokenResponse, OAuthRegistrationRequest, OAuthRegistrationResponse, OAuthMetadata,
+  OAuthUserInfo, ProtectedResourceMetadata, Jwks } from './oauth.js';
+export { ApiError } from './http.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
 export type { CatalogClientConfig } from './catalog.js';
@@ -49,6 +65,7 @@ export type {
   McpInitializeResult,
   McpResource,
   McpResourceContent,
+  McpResourceTemplate,
   McpJsonRpcRequest,
   McpJsonRpcResponse,
 } from './mcp.js';
@@ -79,6 +96,7 @@ export type {
   HfSetup,
   AwsTrust,
   HfConnectorUpdate,
+  HfRelation,
   CatalogConnector,
   GlueConnectorInput,
   HfConnectorInput,

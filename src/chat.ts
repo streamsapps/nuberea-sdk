@@ -1,5 +1,6 @@
 import { Type, type Static, type TSchema } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
+import { responseFailure } from './http.js';
 
 const choices = <T extends string>(...values: T[]) => Type.Union(values.map((value) => Type.Literal(value)));
 const optionalNullable = <T extends TSchema>(schema: T) => Type.Optional(Type.Union([schema, Type.Null()]));
@@ -32,9 +33,7 @@ export const ChatRequestSchema = Type.Object({
     '5', '5.1', '5.2', '5.5', '5.6', '5.6 luna', '5.6 terra', '5.6 sol', '6 luna', '6.1 sol'),
   userMessage: Type.String({ minLength: 1 }),
   previous_response_id: optionalNullable(Type.String()),
-  conversationId: Type.Optional(Type.String({
-    pattern: '^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}|00000000-0000-0000-0000-000000000000|ffffffff-ffff-ffff-ffff-ffffffffffff)$',
-  })),
+  conversationId: Type.Optional(Type.Never()),
   enabledCollections: optionalNullable(Type.Array(Type.String())),
   workflowMode: optionalNullable(choices('read', 'compare', 'parse', 'variants', 'witnesses', 'dss',
     'redaction', 'theme_trace', 'translation')),
@@ -54,7 +53,7 @@ export const ChatRequestSchema = Type.Object({
   })),
   attachments: Type.Optional(Type.Array(ChatAttachmentSchema, { maxItems: 5 })),
   libraryFileIds: Type.Optional(Type.Never()),
-});
+}, { additionalProperties: false });
 export type ChatRequest = Static<typeof ChatRequestSchema>;
 
 export const ReasoningSkillUsageSchema = Type.Object({
@@ -132,7 +131,7 @@ export class ChatError extends Error {
   }
 }
 
-function validate<T extends TSchema>(schema: T, value: unknown, label: string): Static<T> {
+export function validateChatPayload<T extends TSchema>(schema: T, value: unknown, label: string): Static<T> {
   if (!Value.Check(schema, value)) {
     const error = Value.Errors(schema, value).First();
     throw new ChatError(`Invalid ${label}: ${error?.path} ${error?.message}`, 'INVALID_CHAT_PAYLOAD');
@@ -148,7 +147,7 @@ export function resolveChatBaseUrl(oauthBaseUrl: string): string {
 }
 
 export class ChatClient {
-  private readonly endpoint: string;
+  private readonly base: string;
 
   constructor(
     private readonly getFirebaseIdToken: () => Promise<string>,
@@ -161,11 +160,18 @@ export class ChatClient {
       || url.username || url.password || url.search || url.hash) {
       throw new ChatError('Chat requires a credential-free HTTPS API base (HTTP is allowed only on loopback)');
     }
-    this.endpoint = base.replace(/\/+$/, '') + '/chat';
+    this.base = base.replace(/\/+$/, '');
   }
 
   async send(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResponse> {
-    validate(ChatRequestSchema, request, 'chat request');
+    return this.sendStream(request, ChatRequestSchema, ChatResponseSchema, '/chat', options);
+  }
+
+  protected async sendStream<T extends TSchema>(
+    request: ChatRequest, requestSchema: TSchema, doneSchema: T, path: string,
+    options: ChatOptions = {}, handleEvent?: (event: string, data: unknown) => boolean,
+  ): Promise<Static<T>> {
+    validateChatPayload(requestSchema, request, `${path} request`);
     options.signal?.throwIfAborted();
     const body = JSON.stringify(request);
     if (Buffer.byteLength(body, 'utf8') > MAX_CHAT_BODY_BYTES) {
@@ -193,7 +199,7 @@ export class ChatClient {
     const token = await this.getFirebaseIdToken();
     if (!token) throw new ChatError('A Firebase ID token is required for chat', 'CHAT_AUTH_REQUIRED');
     options.signal?.throwIfAborted();
-    const response = await this.fetcher(this.endpoint, {
+    const response = await this.fetcher(this.base + path, {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', Accept: 'text/event-stream' },
       body,
@@ -201,19 +207,8 @@ export class ChatClient {
       signal: options.signal,
     });
     if (!response.ok) {
-      const text = await response.text();
-      let data: unknown;
-      try { data = JSON.parse(text); } catch (error) {
-        if (!(error instanceof SyntaxError)) throw error;
-        throw new ChatError(`Chat request failed (${response.status}): ${text || response.statusText}`, undefined, response.status);
-      }
-      const payload = typeof data === 'object' && data !== null ? data : {};
-      throw new ChatError(
-        'message' in payload && typeof payload.message === 'string' ? payload.message : `Chat request failed (${response.status})`,
-        'code' in payload && typeof payload.code === 'string' ? payload.code : undefined,
-        response.status,
-        'details' in payload ? payload.details : undefined,
-      );
+      const error = await responseFailure(response, `Chat request failed (${response.status})`);
+      throw new ChatError(error.message, error.code, error.status, error.details);
     }
     if (!response.headers.get('content-type')?.toLowerCase().startsWith('text/event-stream') || !response.body) {
       throw new ChatError('Expected a chat SSE response', 'INVALID_CHAT_STREAM');
@@ -222,7 +217,7 @@ export class ChatClient {
     const reader = response.body.getReader();
     const decoder = new TextDecoder('utf-8', { fatal: true });
     let buffer = '';
-    const dispatch = (frame: string): ChatResponse | undefined => {
+    const dispatch = (frame: string): Static<T> | undefined => {
       let event = 'message';
       const dataLines: string[] = [];
       for (const line of frame.split(/\r?\n/)) {
@@ -239,33 +234,37 @@ export class ChatClient {
         if (!(error instanceof SyntaxError)) throw error;
         throw new ChatError(`Invalid JSON in chat ${event} event`, 'INVALID_CHAT_STREAM');
       }
-      let result: ChatResponse | undefined;
+      if (handleEvent?.(event, data)) {
+        options.onEvent?.(event, data);
+        return;
+      }
+      let result: Static<T> | undefined;
       switch (event) {
         case 'message': {
-          const chunk = validate(Type.Object({ chunk: Type.String() }), data, 'chunk');
+          const chunk = validateChatPayload(Type.Object({ chunk: Type.String() }), data, 'chunk');
           options.onChunk?.(chunk.chunk);
           break;
         }
         case 'reasoning_skills': {
-          const skills = validate(Type.Array(ReasoningSkillUsageSchema), data, 'reasoning skills');
+          const skills = validateChatPayload(Type.Array(ReasoningSkillUsageSchema), data, 'reasoning skills');
           options.onReasoningSkills?.(skills);
           break;
         }
         case 'tool_call_start':
         case 'tool_call': {
-          const tool = validate(ToolCallRecordSchema, data, 'tool call');
+          const tool = validateChatPayload(ToolCallRecordSchema, data, 'tool call');
           if (event === 'tool_call_start') options.onToolCallStart?.(tool);
           else options.onToolCall?.(tool);
           break;
         }
         case 'thinking': {
-          const thinking = validate(ThinkingSchema, data, 'thinking event');
+          const thinking = validateChatPayload(ThinkingSchema, data, 'thinking event');
           options.onThinking?.(thinking);
           break;
         }
-        case 'done': result = validate(ChatResponseSchema, data, 'chat response'); break;
+        case 'done': result = validateChatPayload(doneSchema, data, 'chat response'); break;
         case 'error': {
-          const error = validate(ErrorSchema, data, 'chat error');
+          const error = validateChatPayload(ErrorSchema, data, 'chat error');
           options.onEvent?.(event, error);
           throw new ChatError(error.message, error.code, response.status, error.details);
         }
@@ -284,12 +283,12 @@ export class ChatClient {
           const frame = buffer.slice(0, boundary.index);
           buffer = buffer.slice(boundary.index + boundary[0].length);
           const result = dispatch(frame);
-          if (result) return result;
+          if (result !== undefined) return result;
         }
         if (done) {
           if (buffer) {
             const result = dispatch(buffer);
-            if (result) return result;
+            if (result !== undefined) return result;
           }
           throw new ChatError('Chat stream ended without a done event', 'INCOMPLETE_CHAT_STREAM');
         }
