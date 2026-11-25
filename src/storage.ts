@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,13 +66,15 @@ function stateDir(): string {
   return path.join(xdgState, 'nuberea');
 }
 
-export function tokenStoreAccount(oauthBaseUrl: string): string {
-  return `tokens:${new URL(oauthBaseUrl).host}`;
+export function tokenStoreAccount(oauthBaseUrl: string, resource?: string): string {
+  const suffix = resource ? `:${createHash('sha256').update(resource).digest('hex').slice(0, 16)}` : '';
+  return `tokens:${new URL(oauthBaseUrl).host}${suffix}`;
 }
 
-export function defaultTokenFile(oauthBaseUrl?: string): string {
+export function defaultTokenFile(oauthBaseUrl?: string, resource?: string): string {
+  const suffix = resource ? `-${createHash('sha256').update(resource).digest('hex').slice(0, 16)}` : '';
   const fileName = oauthBaseUrl
-    ? `tokens-${new URL(oauthBaseUrl).host.replace(/[^A-Za-z0-9._-]/g, '_')}.json`
+    ? `tokens-${new URL(oauthBaseUrl).host.replace(/[^A-Za-z0-9._-]/g, '_')}${suffix}.json`
     : 'tokens.json';
   return path.join(stateDir(), fileName);
 }
@@ -134,13 +137,14 @@ export async function saveTokens(
   tokens: PersistedTokens,
   tokenFile: string,
   oauthBaseUrl: string,
+  resource?: string,
 ): Promise<void> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
       await keytar.setPassword(
         KEYCHAIN_SERVICE,
-        tokenStoreAccount(oauthBaseUrl),
+        tokenStoreAccount(oauthBaseUrl, resource),
         JSON.stringify(tokens),
       );
       // Remove any stale file so we don't leave plaintext tokens on disk
@@ -159,15 +163,16 @@ export async function saveTokens(
 export async function loadTokens(
   tokenFile: string,
   oauthBaseUrl: string,
+  resource?: string,
 ): Promise<PersistedTokens | null> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
-      const account = tokenStoreAccount(oauthBaseUrl);
+      const account = tokenStoreAccount(oauthBaseUrl, resource);
       const raw = await keytar.getPassword(KEYCHAIN_SERVICE, account);
       if (raw) return JSON.parse(raw) as PersistedTokens;
 
-      const legacy = await keytar.getPassword(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT);
+      const legacy = resource ? null : await keytar.getPassword(KEYCHAIN_SERVICE, LEGACY_KEYCHAIN_ACCOUNT);
       if (legacy) {
         const tokens = JSON.parse(legacy) as PersistedTokens;
         if (tokenMatchesOrigin(tokens, oauthBaseUrl)) {
@@ -180,14 +185,14 @@ export async function loadTokens(
     }
   }
 
-  return readTokens(tokenFile) ?? migrateLegacyFile(tokenFile, oauthBaseUrl);
+  return readTokens(tokenFile) ?? (resource ? null : migrateLegacyFile(tokenFile, oauthBaseUrl));
 }
 
-export async function deleteTokens(tokenFile: string, oauthBaseUrl: string): Promise<void> {
+export async function deleteTokens(tokenFile: string, oauthBaseUrl: string, resource?: string): Promise<void> {
   const keytar = loadKeytar();
   if (keytar) {
     try {
-      await keytar.deletePassword(KEYCHAIN_SERVICE, tokenStoreAccount(oauthBaseUrl));
+      await keytar.deletePassword(KEYCHAIN_SERVICE, tokenStoreAccount(oauthBaseUrl, resource));
     } catch {
       // Ignore
     }

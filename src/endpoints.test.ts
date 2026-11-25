@@ -22,6 +22,10 @@ describe('MCP endpoint resolution', () => {
     );
     expect(tokenStoreAccount('https://auth.nuberea.com')).toBe('tokens:auth.nuberea.com');
     expect(tokenStoreAccount('https://auth.nubereappe.com')).toBe('tokens:auth.nubereappe.com');
+    expect(defaultTokenFile('https://auth.nuberea.com', 'https://api.nuberea.com'))
+      .not.toBe(defaultTokenFile('https://auth.nuberea.com'));
+    expect(tokenStoreAccount('https://auth.nuberea.com', 'https://api.nuberea.com'))
+      .not.toBe(tokenStoreAccount('https://auth.nuberea.com'));
   });
 });
 

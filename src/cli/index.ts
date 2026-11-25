@@ -671,12 +671,6 @@ async function main(): Promise<void> {
     return;
   }
 
-  // All other commands need auth — ensure we have it
-  if (!flags.token && !process.env.NUBEREA_ACCESS_TOKEN && !await client.checkAuth()) {
-    console.log('Not authenticated. Signing in...\n');
-    await client.login();
-  }
-
   switch (command) {
     case 'tool':
       return cmdTool(client, args, raw);

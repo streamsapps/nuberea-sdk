@@ -4,19 +4,37 @@ The [REST documentation](https://nuberea.com/docs/api/) describes the selected
 public endpoints. The SDK defaults to production and preserves the existing MCP
 and catalog interfaces.
 
+The shared credential flow requires the coordinated auth/MCP and chat backend
+branches. Deploy those first, then publish the SDK and synchronize web API docs.
+Do not silently fall back to another token type when an old backend rejects it.
+
 ## Credentials and service hosts
 
 | Surface | Production host | Credential |
 |---|---|---|
-| Chat and agent planning/execution | `https://api.nuberea.com/v1` | Firebase ID token |
-| Native Study | `https://mcp.nuberea.com` | Firebase ID token |
-| MCP and tenant catalog | `https://mcp.nuberea.com` | MCP OAuth access token |
+| Chat and agent planning/execution | `https://api.nuberea.com/v1` | OAuth API token with chat audience/scope, or Firebase ID token |
+| Native Study | `https://mcp.nuberea.com` | OAuth API token with Study audience/scope, or Firebase ID token |
+| MCP and tenant catalog | `https://mcp.nuberea.com` | OAuth token with MCP audience/scope |
 | OAuth/OIDC | `https://auth.nuberea.com` | Depends on the operation |
 
-`client.login()` uses browser sign-in, persists OAuth credentials through the
-existing storage mechanism and keeps the Firebase ID token only in memory.
-Browser sign-in is requested again near Firebase-token expiry. An already
-signed-in application can provide a refreshing Firebase credential:
+`client.login()` bootstraps OAuth through Firebase browser sign-in and keeps the
+Firebase credential only in memory. The default SDK requests resource
+`https://api.nuberea.com` with scopes `mcp chat study` (the corresponding
+preproduction resource is `https://api.nubereappe.com`). Issued access tokens
+explicitly declare the MCP, chat and Study audiences. Narrower grants include
+only their corresponding audiences; `openid` adds an explicit userinfo audience
+without granting any data-service audience. A legacy MCP-only token
+does not acquire chat/Study access merely because it has the same issuer.
+
+OAuth credentials are stored per issuer/resource. Upgrading from a legacy
+MCP-only cache requires one new sign-in, not an attempted scope escalation via
+the old refresh token. Thereafter one cached credential and one concurrent
+refresh request serve chat, agents, Study and MCP/catalog across process restarts.
+Before refreshing, the manager reloads any credential already rotated by another
+SDK instance, avoiding reuse of a stale refresh token.
+Firebase token expiry does not force another browser sign-in while the OAuth
+refresh token remains valid. An already signed-in application can supply its
+Firebase session for OAuth bootstrap and legacy Firebase-authenticated API calls:
 
 ```ts
 const client = new NuBerea({
@@ -25,8 +43,9 @@ const client = new NuBerea({
 ```
 
 For short-lived automation, `firebaseIdToken` supplies a static Firebase token.
-The provider takes precedence over that static value. `accessToken` remains an
-MCP OAuth credential; it is not used as a Firebase credential.
+The provider takes precedence over that static value. `accessToken` is an OAuth
+credential, never a Firebase credential. The caller must supply a token with
+the requested service's declared audience and scope.
 
 Chat follows `baseUrl` / `NUBEREA_BASE_URL`; `chatBaseUrl` overrides its REST
 base, including `/v1`. Study follows the MCP host. New chat, Study and OAuth
@@ -137,7 +156,8 @@ const dictionary = await client.study.greekLexicon({ lemma: 'λόγος' });
 const domain = await client.study.greekSemanticDomain('033');
 ```
 
-These read-only GETs require paid access and a Firebase credential. They do
+These read-only GETs require paid access and an appropriately scoped API token
+or a signed-in Firebase account. They do
 not invoke an LLM or substitute fixtures on failure. Corpora include Greek,
 Hebrew, LXX and feature-gated Latin. Chapter/verse bounds are 1–150 / 1–200.
 Preserve `token_id` identity (Hebrew morphemes can share a ref), attribution,
@@ -174,11 +194,19 @@ and platform-verification routes are excluded.
 explicit state/resource; it does not follow redirects and validates the returned
 target/state/issuer. `token()` form-encodes public-client code/refresh grants and
 returns credentials without replacing cached SDK login state. Never
-automatically retry an uncertain rotating refresh-token exchange.
+automatically retry an uncertain rotating refresh-token exchange. The credential
+manager coalesces refresh calls, validates token responses and propagates
+refresh failures without silently opening a browser. Use `login()` explicitly
+when reauthentication is required. Logout invalidates in-flight acquisitions
+and clears this issuer/resource's persisted credentials.
+Pending browser callback listeners are closed on logout, and callback state is
+bound to the active sign-in so an old browser tab cannot complete a new session.
+This is local logout; it does not invent a server-wide token-revocation endpoint.
 
 `userinfo` requires `openid`; email claims additionally require `email`.
-Configure `auth: { scopes: ['mcp', 'openid', 'email'] }` before browser login to
-request those scopes. Default consent stays MCP-only. The `method` option
+Configure `auth: { scopes: ['mcp', 'chat', 'study', 'openid', 'email'] }` before
+browser login to add identity scopes while retaining API access. Explicit scope
+configuration is respected; the SDK does not silently add permissions. The `method` option
 supports GET or POST.
 
 The current registration endpoint returns metadata without durable client

@@ -24,7 +24,8 @@ export const OAuthTokenRequestSchema = Type.Union([
 ]);
 export type OAuthTokenRequest = Static<typeof OAuthTokenRequestSchema>;
 export const OAuthTokenResponseSchema = Type.Object({
-  access_token: Type.String(), token_type: Type.String(), expires_in: Type.Number(),
+  access_token: Type.String({ minLength: 1 }), token_type: Type.String({ minLength: 1 }),
+  expires_in: Type.Number({ exclusiveMinimum: 0 }),
   refresh_token: Type.Optional(Type.String()), scope: Type.Optional(Type.String()),
   id_token: Type.Optional(Type.String()),
 });

@@ -105,8 +105,8 @@ export type GreekSemanticDomainStudy = Static<typeof GreekSemanticDomainStudySch
 
 export class StudyClient {
   private readonly rest: RestClient;
-  constructor(getFirebaseIdToken: () => Promise<string>, base = 'https://mcp.nuberea.com', fetcher: typeof fetch = fetch) {
-    this.rest = new RestClient(apiBaseUrl(base), getFirebaseIdToken, fetcher);
+  constructor(getToken: () => Promise<string>, base = 'https://mcp.nuberea.com', fetcher: typeof fetch = fetch) {
+    this.rest = new RestClient(apiBaseUrl(base), getToken, fetcher);
   }
   async verse(request: StudyReference, options: Pick<ApiRequestOptions, 'signal'> = {}): Promise<VerseStudy> {
     parseApiPayload(StudyReferenceSchema, request, 'study reference');

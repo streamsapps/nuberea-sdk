@@ -5,7 +5,7 @@
  * into a single, ergonomic interface.
  */
 
-import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
+import { NuBereaAuth, resolveMcpUrl, resolveApiResource, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
 import { ChatClient, resolveChatBaseUrl, type ChatRequest, type ChatOptions, type ChatResponse } from './chat.js';
 import { AgentClient } from './agent.js';
@@ -89,6 +89,11 @@ export class NuBerea {
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
       mcpUrl: this.mcpUrl,
+      ...(resolveApiResource(this.oauthBaseUrl) ? {
+        resource: resolveApiResource(this.oauthBaseUrl), scopes: ['mcp', 'chat', 'study'],
+      } : {}),
+      firebaseTokenProvider: () => this.firebaseTokenProvider
+        ? this.firebaseTokenProvider() : Promise.resolve(this.firebaseIdToken),
       ...config?.auth,
     });
   }
@@ -111,12 +116,7 @@ export class NuBerea {
    */
   async checkAuth(): Promise<boolean> {
     if (this.staticToken) return true;
-    try {
-      await this.auth.getAccessToken();
-      return true;
-    } catch {
-      return false;
-    }
+    return Boolean(await this.auth.getAccessTokenIfAvailable());
   }
 
   /**
@@ -140,6 +140,12 @@ export class NuBerea {
     return this.auth.getAccessToken();
   }
 
+  private getApiToken(): Promise<string> {
+    if (this.firebaseTokenProvider) return this.firebaseTokenProvider();
+    if (this.firebaseIdToken) return Promise.resolve(this.firebaseIdToken);
+    return this.getToken();
+  }
+
   private getFirebaseToken(): Promise<string> {
     if (this.firebaseTokenProvider) return this.firebaseTokenProvider();
     if (this.firebaseIdToken) return Promise.resolve(this.firebaseIdToken);
@@ -149,20 +155,20 @@ export class NuBerea {
   /** Send a normal chat turn, stream typed activity callbacks, and return the complete done payload. */
   async chat(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResponse> {
     this.chatClient ??= new ChatClient(
-      () => this.getFirebaseToken(),
-      this.chatBaseUrl ?? resolveChatBaseUrl(this.baseUrl),
+      () => this.getApiToken(),
+      this.chatBaseUrl ?? resolveChatBaseUrl(this.oauthBaseUrl),
     );
     return this.chatClient.send(request, options);
   }
 
   get agent(): AgentClient {
     return this.agentClient ??= new AgentClient(
-      () => this.getFirebaseToken(), this.chatBaseUrl ?? resolveChatBaseUrl(this.baseUrl),
+      () => this.getApiToken(), this.chatBaseUrl ?? resolveChatBaseUrl(this.oauthBaseUrl),
     );
   }
 
   get study(): StudyClient {
-    return this.studyClient ??= new StudyClient(() => this.getFirebaseToken(), new URL(this.mcpUrl).origin);
+    return this.studyClient ??= new StudyClient(() => this.getApiToken(), new URL(this.mcpUrl).origin);
   }
 
   /** Low-level standard OAuth/OIDC routes; token results are not automatically persisted. */
@@ -286,17 +292,13 @@ export class NuBerea {
    * List all available MCP tools.
    * The `/tools` endpoint is identity-aware: when a bearer token is sent, the
    * caller tenant's active BYO-data catalog tools are merged into the built-in
-   * roster. The token is attached best-effort — unauthenticated callers still
-   * get the built-in roster rather than an error.
+   * roster. Missing credentials use anonymous discovery without opening a browser;
+   * failures refreshing an existing credential are propagated, not hidden.
    */
   async tools(): Promise<ToolInfo[]> {
-    // Send the OAuth token when we have one so tenant catalog tools are included.
     const headers: Record<string, string> = {};
-    try {
-      headers.Authorization = `Bearer ${await this.getToken()}`;
-    } catch {
-      // Not signed in — fall back to the anonymous (built-ins only) response.
-    }
+    const token = this.staticToken ?? await this.auth.getAccessTokenIfAvailable();
+    if (token) headers.Authorization = `Bearer ${token}`;
 
     const toolsUrl = new URL('/tools', this.mcpUrl).toString();
     const res = await fetch(toolsUrl, { headers });

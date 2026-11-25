@@ -10,6 +10,8 @@
 import { exec } from 'node:child_process';
 import crypto from 'node:crypto';
 import http from 'node:http';
+import { ApiError } from './http.js';
+import { OAuthClient, type OAuthTokenResponse } from './oauth.js';
 import {
   type PersistedTokens,
   defaultTokenFile,
@@ -33,8 +35,12 @@ export interface AuthConfig {
   tokenFile: string;
   /** Login page URL for browser-based sign-in */
   loginUrl: string;
-  /** Add openid/email when requesting userinfo. Default preserves MCP-only consent. */
+  /** Requested scopes; NuBerea defaults to mcp/chat/study, direct auth clients to mcp. */
   scopes?: string[];
+  /** OAuth resource binding. Omitted preserves the legacy MCP-only resource. */
+  resource?: string;
+  /** Existing Firebase session used only to bootstrap OAuth; never persisted. */
+  firebaseTokenProvider?: () => Promise<string | undefined>;
 }
 
 /** Tokens kept in memory and persisted to keychain/file (no login credentials). */
@@ -45,6 +51,13 @@ export const MCP_ENDPOINTS = {
   preproduction: 'https://mcp.nubereappe.com/mcp',
   production: 'https://mcp.nuberea.com/mcp',
 } as const;
+
+export function resolveApiResource(oauthBaseUrl: string): string | undefined {
+  const host = new URL(oauthBaseUrl).hostname;
+  if (host === 'auth.nuberea.com' || host === 'api.nuberea.com') return 'https://api.nuberea.com';
+  if (host === 'auth.nubereappe.com' || host === 'api.nubereappe.com') return 'https://api.nubereappe.com';
+  return undefined;
+}
 
 /**
  * Resolve the MCP transport independently from the OAuth/control-plane host.
@@ -87,7 +100,13 @@ export class NuBereaAuth {
   private tokens: StoredTokens | null = null;
   private firebaseCredential: { token: string; expiresAt: number } | null = null;
   private firebaseSignIn: Promise<string> | undefined;
+  private cancelFirebaseSignIn: (() => Promise<void>) | undefined;
   private firebaseGeneration = 0;
+  private accessRequest: { generation: number; promise: Promise<string> } | undefined;
+  private loginRequest: { generation: number; promise: Promise<StoredTokens> } | undefined;
+  private refreshRequest: { generation: number; promise: Promise<StoredTokens> } | undefined;
+  private persistence: Promise<void> = Promise.resolve();
+  private readonly storageResource: string | undefined;
 
   constructor(config?: Partial<AuthConfig>) {
     const oauthBaseUrl =
@@ -98,12 +117,13 @@ export class NuBereaAuth {
       config?.mcpUrl
       ?? process.env.NUBEREA_MCP_URL
       ?? resolveMcpUrl(oauthBaseUrl);
+    this.storageResource = config?.resource && config.resource !== mcpUrl ? config.resource : undefined;
     this.config = {
       ...DEFAULT_CONFIG,
       ...config,
       oauthBaseUrl,
       mcpUrl,
-      tokenFile: config?.tokenFile ?? defaultTokenFile(oauthBaseUrl),
+      tokenFile: config?.tokenFile ?? defaultTokenFile(oauthBaseUrl, this.storageResource),
     };
   }
 
@@ -115,10 +135,17 @@ export class NuBereaAuth {
    * Get a valid access token, refreshing or re-authenticating as needed.
    */
   async getAccessToken(): Promise<string> {
-    // Try loading from keychain/disk
-    if (!this.tokens) {
-      this.tokens = await loadTokens(this.config.tokenFile, this.config.oauthBaseUrl);
-    }
+    const generation = this.firebaseGeneration;
+    if (this.accessRequest?.generation === generation) return this.accessRequest.promise;
+    const promise = this.acquireAccessToken().finally(() => {
+      if (this.accessRequest?.promise === promise) this.accessRequest = undefined;
+    });
+    this.accessRequest = { generation, promise };
+    return promise;
+  }
+
+  private async acquireAccessToken(): Promise<string> {
+    await this.loadStoredCredentials();
 
     // Still valid?
     if (this.tokens && this.tokens.expiresAt > Date.now() + 60_000) {
@@ -127,17 +154,25 @@ export class NuBereaAuth {
 
     // Try refresh
     if (this.tokens?.refreshToken) {
-      try {
-        await this.refresh();
-        return this.tokens!.accessToken;
-      } catch {
-        // Refresh failed — fall through to full login
-      }
+      return (await this.refresh()).accessToken;
     }
 
     // Full login flow
-    await this.login();
-    return this.tokens!.accessToken;
+    return (await this.login()).accessToken;
+  }
+
+  private async loadStoredCredentials(): Promise<void> {
+    if (this.tokens) return;
+    const generation = this.firebaseGeneration;
+    const stored = await loadTokens(this.config.tokenFile, this.config.oauthBaseUrl, this.storageResource);
+    this.assertGeneration(generation);
+    this.tokens ??= stored;
+  }
+
+  /** Refresh existing credentials if needed, but never start interactive sign-in. */
+  async getAccessTokenIfAvailable(): Promise<string | undefined> {
+    await this.loadStoredCredentials();
+    return this.tokens ? this.getAccessToken() : undefined;
   }
 
   /**
@@ -145,23 +180,56 @@ export class NuBereaAuth {
    * The Firebase credential is used only locally — it is never persisted.
    */
   async login(): Promise<StoredTokens> {
+    const generation = this.firebaseGeneration;
+    if (this.loginRequest?.generation === generation) return this.loginRequest.promise;
+    const promise = this.loginImpl().finally(() => {
+      if (this.loginRequest?.promise === promise) this.loginRequest = undefined;
+    });
+    this.loginRequest = { generation, promise };
+    return promise;
+  }
+
+  private async loginImpl(): Promise<StoredTokens> {
+    const generation = this.firebaseGeneration;
     const fbToken = await this.getFirebaseIdToken();
     const { verifier, challenge } = createPkce();
     const code = await this.fetchAuthCode(fbToken, challenge);
     const tokenResponse = await this.exchangeCode(code, verifier);
-
-    this.tokens = {
+    if (!tokenResponse.refresh_token) throw new ApiError('OAuth login did not return a refresh token', 'INVALID_API_RESPONSE');
+    const tokens = {
       accessToken: tokenResponse.access_token,
       refreshToken: tokenResponse.refresh_token,
       expiresAt: Date.now() + tokenResponse.expires_in * 1000,
     };
 
-    await saveTokens(this.tokens, this.config.tokenFile, this.config.oauthBaseUrl);
-    return this.tokens;
+    await this.persist(tokens, generation);
+    return tokens;
   }
 
-  /** Chat uses the Firebase credential, not the MCP OAuth access token. Never persisted. */
+  private assertGeneration(generation: number): void {
+    if (generation !== this.firebaseGeneration) throw new Error('Credential request was cancelled by logout. Sign in again.');
+  }
+
+  private async persist(tokens: StoredTokens, generation: number): Promise<void> {
+    const write = Promise.allSettled([this.persistence]).then(async () => {
+      this.assertGeneration(generation);
+      await saveTokens(tokens, this.config.tokenFile, this.config.oauthBaseUrl, this.storageResource);
+      this.assertGeneration(generation);
+      this.tokens = tokens;
+    });
+    this.persistence = write;
+    return write;
+  }
+
+  /** Firebase credential for initial consent or an explicit compatibility override. Never persisted. */
   async getFirebaseIdToken(): Promise<string> {
+    const generation = this.firebaseGeneration;
+    const provided = await this.config.firebaseTokenProvider?.();
+    this.assertGeneration(generation);
+    if (provided !== undefined) {
+      if (!provided) throw new ApiError('The Firebase token provider returned an empty credential', 'AUTH_REQUIRED');
+      return provided;
+    }
     if (this.firebaseCredential && this.firebaseCredential.expiresAt > Date.now() + 60_000) {
       return this.firebaseCredential.token;
     }
@@ -194,35 +262,43 @@ export class NuBereaAuth {
    * Refresh the access token using the stored refresh token.
    */
   async refresh(): Promise<StoredTokens> {
+    const generation = this.firebaseGeneration;
+    if (this.refreshRequest?.generation === generation) return this.refreshRequest.promise;
+    const promise = this.refreshImpl().finally(() => {
+      if (this.refreshRequest?.promise === promise) this.refreshRequest = undefined;
+    });
+    this.refreshRequest = { generation, promise };
+    return promise;
+  }
+
+  private async refreshImpl(): Promise<StoredTokens> {
+    const generation = this.firebaseGeneration;
     if (!this.tokens?.refreshToken) {
       throw new Error('No refresh token available. Run login() first.');
     }
 
-    const res = await fetch(`${this.config.oauthBaseUrl}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'refresh_token',
-        refresh_token: this.tokens.refreshToken,
-        client_id: this.config.clientId,
-        resource: this.config.mcpUrl,
-      }).toString(),
-    });
-
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Token refresh failed: HTTP ${res.status} — ${body}`);
+    let previous = this.tokens;
+    const stored = await loadTokens(this.config.tokenFile, this.config.oauthBaseUrl, this.storageResource);
+    this.assertGeneration(generation);
+    if (stored?.refreshToken && stored.refreshToken !== previous.refreshToken) {
+      previous = stored;
+      this.tokens = stored;
+      if (stored.expiresAt > Date.now() + 60_000) return stored;
     }
-
-    const data = await res.json() as TokenResponse;
-    this.tokens = {
+    const data = await this.oauthClient().token({
+      grant_type: 'refresh_token',
+      refresh_token: previous.refreshToken,
+      client_id: this.config.clientId,
+      resource: this.config.resource ?? this.config.mcpUrl,
+    });
+    const tokens = {
       accessToken: data.access_token,
-      refreshToken: data.refresh_token ?? this.tokens.refreshToken,
+      refreshToken: data.refresh_token ?? previous.refreshToken,
       expiresAt: Date.now() + data.expires_in * 1000,
     };
 
-    await saveTokens(this.tokens, this.config.tokenFile, this.config.oauthBaseUrl);
-    return this.tokens;
+    await this.persist(tokens, generation);
+    return tokens;
   }
 
   /**
@@ -232,7 +308,12 @@ export class NuBereaAuth {
     this.tokens = null;
     this.firebaseCredential = null;
     this.firebaseGeneration++;
-    await deleteTokens(this.config.tokenFile, this.config.oauthBaseUrl);
+    try {
+      await this.cancelFirebaseSignIn?.();
+    } finally {
+      await Promise.allSettled([this.persistence]);
+      await deleteTokens(this.config.tokenFile, this.config.oauthBaseUrl, this.storageResource);
+    }
   }
 
   /**
@@ -249,11 +330,18 @@ export class NuBereaAuth {
 
   private fetchFirebaseToken(): Promise<string> {
     return new Promise((resolve, reject) => {
-      const callbackUrl = `http://localhost:${this.config.firebaseAuthPort}/callback`;
+      const state = crypto.randomUUID();
+      const callbackUrl = `http://localhost:${this.config.firebaseAuthPort}/callback?state=${state}`;
       const loginUrl = `${this.config.loginUrl}?return_to=${encodeURIComponent(callbackUrl)}`;
 
       const server = http.createServer((req, res) => {
+        res.setHeader('Connection', 'close');
         const url = new URL(req.url!, `http://localhost:${this.config.firebaseAuthPort}`);
+        if (url.pathname !== '/callback' || url.searchParams.get('state') !== state) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('Sign-in callback state is invalid.');
+          return;
+        }
         const token = url.searchParams.get('firebase_token');
         const error = url.searchParams.get('error');
 
@@ -264,6 +352,20 @@ export class NuBereaAuth {
         if (error) return reject(new Error(`Firebase auth error: ${error}`));
         if (!token) return reject(new Error('firebase_token missing from callback'));
         resolve(token);
+      });
+
+      const cancel = async () => {
+        reject(new Error('Firebase sign-in was cancelled by logout. Sign in again.'));
+        await new Promise<void>((closed, failed) => {
+          server.close((error) => {
+            if (error && (!('code' in error) || error.code !== 'ERR_SERVER_NOT_RUNNING')) failed(error);
+            else closed();
+          });
+        });
+      };
+      this.cancelFirebaseSignIn = cancel;
+      server.once('close', () => {
+        if (this.cancelFirebaseSignIn === cancel) this.cancelFirebaseSignIn = undefined;
       });
 
       server.listen(this.config.firebaseAuthPort, () => {
@@ -278,67 +380,37 @@ export class NuBereaAuth {
   // OAuth 2.1 + PKCE
   // ==========================================================================
 
-  private fetchAuthCode(firebaseJwt: string, challenge: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const redirectUri = `http://localhost:${this.config.callbackPort}/callback`;
-
-      const params = new URLSearchParams({
-        response_type: 'code',
-        client_id: this.config.clientId,
-        redirect_uri: redirectUri,
-        code_challenge: challenge,
-        code_challenge_method: 'S256',
-        state: crypto.randomBytes(8).toString('hex'),
-        scope: this.config.scopes?.join(' ') ?? 'mcp',
-        resource: this.config.mcpUrl,
-      });
-
-      const authorizeUrl = `${this.config.oauthBaseUrl}/authorize?${params}`;
-
-      // Call authorize directly with Firebase token
-      fetch(authorizeUrl, {
-        method: 'GET',
-        redirect: 'manual',
-        headers: { Authorization: `Bearer ${firebaseJwt}` },
-      })
-        .then((res) => {
-          const location = res.headers.get('location');
-          if (!location) throw new Error(`Expected redirect from /authorize, got HTTP ${res.status}`);
-
-          const url = new URL(location.startsWith('http') ? location : `${redirectUri}${location}`);
-          const code = url.searchParams.get('code');
-          const error = url.searchParams.get('error');
-
-          if (error) throw new Error(`OAuth error: ${error}`);
-          if (!code) throw new Error(`No code in redirect: ${location}`);
-          resolve(code);
-        })
-        .catch(reject);
+  private oauthClient(firebaseJwt?: string): OAuthClient {
+    return new OAuthClient({
+      baseUrl: this.config.oauthBaseUrl,
+      getAccessToken: () => this.getAccessToken(),
+      getFirebaseIdToken: () => firebaseJwt ? Promise.resolve(firebaseJwt) : this.getFirebaseIdToken(),
     });
   }
 
-  private async exchangeCode(code: string, verifier: string): Promise<TokenResponse> {
-    const redirectUri = `http://localhost:${this.config.callbackPort}/callback`;
-
-    const res = await fetch(`${this.config.oauthBaseUrl}/token`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code,
-        redirect_uri: redirectUri,
-        client_id: this.config.clientId,
-        code_verifier: verifier,
-        resource: this.config.mcpUrl,
-      }).toString(),
+  private async fetchAuthCode(firebaseJwt: string, challenge: string): Promise<string> {
+    const result = await this.oauthClient(firebaseJwt).authorize({
+      response_type: 'code',
+      client_id: this.config.clientId,
+      redirect_uri: `http://localhost:${this.config.callbackPort}/callback`,
+      code_challenge: challenge,
+      code_challenge_method: 'S256',
+      state: crypto.randomUUID(),
+      scope: this.config.scopes?.join(' ') ?? 'mcp',
+      resource: this.config.resource ?? this.config.mcpUrl,
     });
+    return result.code;
+  }
 
-    if (!res.ok) {
-      const body = await res.text();
-      throw new Error(`Token exchange failed: HTTP ${res.status} — ${body}`);
-    }
-
-    return res.json() as Promise<TokenResponse>;
+  private exchangeCode(code: string, verifier: string): Promise<OAuthTokenResponse> {
+    return this.oauthClient().token({
+      grant_type: 'authorization_code',
+      code,
+      redirect_uri: `http://localhost:${this.config.callbackPort}/callback`,
+      client_id: this.config.clientId,
+      code_verifier: verifier,
+      resource: this.config.resource ?? this.config.mcpUrl,
+    });
   }
 
 }
@@ -346,13 +418,6 @@ export class NuBereaAuth {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-interface TokenResponse {
-  access_token: string;
-  refresh_token: string;
-  token_type: string;
-  expires_in: number;
-}
 
 export function createPkce(): { verifier: string; challenge: string } {
   const verifier = crypto.randomBytes(32).toString('base64url');

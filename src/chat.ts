@@ -150,7 +150,7 @@ export class ChatClient {
   private readonly base: string;
 
   constructor(
-    private readonly getFirebaseIdToken: () => Promise<string>,
+    private readonly getToken: () => Promise<string>,
     base = 'https://api.nuberea.com/v1',
     private readonly fetcher: typeof fetch = fetch,
   ) {
@@ -196,8 +196,8 @@ export class ChatClient {
     if (totalAttachmentBytes > MAX_CHAT_ATTACHMENT_BYTES) {
       throw new ChatError('Attachments exceed the aggregate decoded 10 MiB limit', 'INVALID_CHAT_PAYLOAD');
     }
-    const token = await this.getFirebaseIdToken();
-    if (!token) throw new ChatError('A Firebase ID token is required for chat', 'CHAT_AUTH_REQUIRED');
+    const token = await this.getToken();
+    if (!token) throw new ChatError('An API access token or Firebase ID token is required for chat', 'CHAT_AUTH_REQUIRED');
     options.signal?.throwIfAborted();
     const response = await this.fetcher(this.base + path, {
       method: 'POST',

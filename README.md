@@ -212,9 +212,10 @@ const response = await client.chat({
 console.log(response.reasoningSkills);
 ```
 
-Chat, agents and Study use a Firebase ID token from browser sign-in or
-`getFirebaseIdToken`; MCP/catalog continue to use OAuth. Ephemeral files are
-supported; managed `conversationId` modes that persist Firebase history are not.
+Chat, agents, Study and MCP/catalog share a refreshable OAuth API credential.
+Explicit Firebase token providers remain supported for chat and Study. Deploy
+the coordinated auth/chat backend changes before publishing this SDK version.
+Managed `conversationId` modes that persist Firebase history remain excluded.
 
 See the [API guide](docs/api.md) for agents, Study, files and authentication,
 or the [REST documentation](https://nuberea.com/docs/api/).
@@ -259,7 +260,7 @@ Run `nuberea tools` to see the full list.
 |---|---|
 | `NUBEREA_BASE_URL` | OAuth base URL (default: `https://auth.nuberea.com`) |
 | `NUBEREA_MCP_URL` | MCP transport URL (default: `https://mcp.nuberea.com/mcp`) |
-| `NUBEREA_ACCESS_TOKEN` | Pre-set MCP OAuth access token (not a chat credential) |
+| `NUBEREA_ACCESS_TOKEN` | Pre-set OAuth token; chat/Study need their own declared audiences and scopes |
 | `NUBEREA_FIREBASE_ID_TOKEN` | Pre-set Firebase ID token for CLI chat |
 | `NUBEREA_CHAT_URL` | Override the CLI Chat REST base, including `/v1` |
 
@@ -281,15 +282,15 @@ explicitly.
 
 ## Authentication
 
-MCP uses OAuth 2.1 with PKCE; chat, agents and Study use Firebase ID tokens.
+OAuth API credentials use PKCE and rotating refresh tokens; Firebase remains the initial sign-in provider.
 
 1. `nuberea login` opens your browser to `nuberea.com/login`
 2. Sign in to your nuberea account
-3. OAuth tokens are stored per OAuth host in the OS keychain when available,
+3. OAuth tokens are stored per OAuth host/resource in the OS keychain when available,
    otherwise under the platform state directory (for example,
-   `~/Library/Application Support/nuberea/tokens-auth.nuberea.com.json` on macOS)
-4. OAuth tokens auto-refresh. Firebase tokens remain in memory; chat sign-in
-   is requested again near expiry unless a refreshing token provider is supplied.
+   `~/Library/Application Support/nuberea/tokens-auth.nuberea.com-<resource-hash>.json` on macOS)
+4. OAuth refresh is shared across services and concurrent calls. Firebase
+   credentials stay in memory; refresh failures are explicit, not hidden sign-in prompts.
 
 Install `@nuberea/sdk` in the consuming project or reference it through an npm
 workspace/file dependency. Node.js ESM does not use `NODE_PATH` to resolve

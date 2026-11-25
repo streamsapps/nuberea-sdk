@@ -71,14 +71,14 @@ describe('native SDK chat', () => {
     expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual(fullRequest);
   });
 
-  it('uses in-memory browser credentials when only an MCP OAuth token was configured', async () => {
+  it('uses the configured OAuth API credential without opening a second Firebase sign-in', async () => {
     const firebase = vi.spyOn(NuBereaAuth.prototype, 'getFirebaseIdToken').mockResolvedValue('browser-firebase');
     const fetcher = vi.fn().mockImplementation(async () => stream(frame('done', answer)));
     vi.stubGlobal('fetch', fetcher);
     await new NuBerea({ accessToken: 'oauth-only' }).chat(request);
-    expect(firebase).toHaveBeenCalledOnce();
+    expect(firebase).not.toHaveBeenCalled();
     expect(fetcher.mock.calls[0][0]).toBe('https://api.nuberea.com/v1/chat');
-    expect(new Headers(fetcher.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer browser-firebase');
+    expect(new Headers(fetcher.mock.calls[0][1].headers).get('Authorization')).toBe('Bearer oauth-only');
   });
 
   it('does not impose chat transport restrictions on existing self-hosted MCP clients', async () => {

@@ -28,7 +28,7 @@
 
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
-export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl, createPkce } from './auth.js';
+export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl, resolveApiResource, createPkce } from './auth.js';
 export {
   ChatClient, ChatError, ChatRequestSchema, ChatResponseSchema, ReasoningSkillUsageSchema,
   ScriptureReaderTargetSchema, ToolCallRecordSchema, resolveChatBaseUrl,

@@ -23,6 +23,13 @@ function schema(value) {
     .filter(([key]) => !['$id', '$schema'].includes(key)).map(([key, item]) => [key, schema(item)]));
   if (result.$ref && !result.$ref.startsWith('#/')) result.$ref = `#/components/schemas/${result.$ref}`;
   if ('const' in result) { result.enum = [result.const]; delete result.const; }
+  for (const bound of ['Minimum', 'Maximum']) {
+    const key = `exclusive${bound}`;
+    if (typeof result[key] === 'number') {
+      result[bound.toLowerCase()] = result[key];
+      result[key] = true;
+    }
+  }
   if (result.anyOf) {
     const nullable = result.anyOf.some((item) => item.type === 'null');
     const choices = result.anyOf.filter((item) => item.type !== 'null');
@@ -120,7 +127,7 @@ function operation(method, path, { tag, id, summary, request, result, code = '20
 function streamOperation(path, request, result, id, events, example) {
   const op = operation('post', path, {
     tag: path === '/chat' ? 'Chat' : 'Agents', id, summary: id,
-    request, result, security: firebase, servers: apiServer,
+    request, result, security: [...firebase, { oauthAuth: ['chat'] }], servers: apiServer,
     description: 'Read-only conversation-data mode: conversationId and unknown fields are rejected by the SDK. No managed Firebase history/revision writes. Provider response state, authentication and AWS rate-limit state are not covered by this restriction. Attachments are ephemeral and require Plus. Agent routes require Plus. SSE ends in done or error; never automatically retry an uncertain turn.',
   });
   op.responses['200'] = { description: 'JSON SSE activity followed by a complete done payload, or an error event.', content: {
@@ -159,8 +166,9 @@ for (const [path, request, result, id] of [
   ['/v1/study/lexicon/greek', 'GreekLexiconRequest', 'GreekLexiconStudy', 'studyGreekLexicon'],
   ['/v1/study/semantic-domain/greek', 'SemanticDomainRequest', 'GreekSemanticDomainStudy', 'studyGreekSemanticDomain'],
 ]) {
-  const op = operation('get', path, { tag: 'Study', id, summary: id, result, security: firebase,
-    description: 'Read-only. Firebase ID token and paid access required; never substitute fixtures for a failed live request. Only the listed scalar query parameters are accepted. Greek lexicon requires exactly one of lemma or strong; Latin corpus is feature-gated.' });
+  const op = operation('get', path, { tag: 'Study', id, summary: id, result,
+    security: [...firebase, { oauthAuth: ['study'] }],
+    description: 'Read-only. A signed-in Firebase ID token or an OAuth API token explicitly declaring the Study audience and study scope is required, together with paid access. MCP-only tokens are invalid here. Never substitute fixtures for a failed live request. Only listed scalar query parameters are accepted. Greek lexicon requires exactly one of lemma or strong; Latin corpus is feature-gated.' });
   const source = schemas[request];
   const props = source.properties ?? Object.assign({}, ...source.anyOf.map((item) => item.properties));
   op.parameters = Object.entries(props).map(([name, item]) => ({
@@ -305,12 +313,13 @@ for (const method of ['get', 'post']) operation(method, '/userinfo', {
   description: 'Requires openid scope. Email claims require email scope. Reads Firebase identity metadata; does not write conversation data.',
 });
 
-document.info.description = 'Selected NuBerea SDK/REST contract: read-only chat and agent conversation modes, native Study, generic MCP transport, all tenant registry operations, and standard OAuth/OIDC. Managed Firebase conversation persistence, partner auth, health, billing and discovered tool catalogs are intentionally outside this document. Tenant management and OAuth token state retain their normal AWS/local mutations. Firebase ID tokens authenticate chat/agents/Study; MCP OAuth tokens authenticate MCP/catalog/userinfo. Use SDK browser login or a refreshing Firebase token provider.';
+document.info.description = 'Selected NuBerea SDK/REST contract: read-only chat and agents, native Study, MCP transport, tenant registry operations and standard OAuth/OIDC. The unified API resource issues tokens with explicit MCP/chat/Study audiences and independent mcp/chat/study scopes; an MCP-only token never gains chat/Study access. Chat and Study also retain Firebase ID-token compatibility. Managed Firebase conversation persistence, partner auth, health, billing and discovered tool catalogs are excluded. Tenant management and OAuth state retain their normal AWS/local mutations.';
 document.servers = apiServer;
 document.components.securitySchemes.oauthAuth = {
   type: 'oauth2', flows: { authorizationCode: {
     authorizationUrl: 'https://auth.nuberea.com/authorize', tokenUrl: 'https://auth.nuberea.com/token',
-    scopes: { mcp: 'MCP and tenant catalog access', openid: 'OAuth subject identity', email: 'Email identity claims' },
+    scopes: { mcp: 'MCP and tenant catalog access', chat: 'Request-scoped chat and agent access',
+      study: 'Native Study access', openid: 'OAuth subject identity', email: 'Email identity claims' },
   } },
 };
 document.tags = ['Chat', 'Agents', 'Study', 'MCP', 'Catalog', 'Auth'].map((name) => ({ name }));
