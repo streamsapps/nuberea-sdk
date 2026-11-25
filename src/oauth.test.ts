@@ -9,6 +9,14 @@ const request: AuthorizeRequest = {
 };
 afterEach(() => { vi.clearAllMocks(); });
 describe('standard OAuth SDK', () => {
+  it('omits an explicitly undefined optional scope instead of requesting the literal scope undefined', async () => {
+    const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: {
+      Location: 'http://localhost:9876/callback?code=code&state=state',
+    } }));
+    await new OAuthClient(config, fetcher).authorize({ ...request, scope: undefined });
+    expect(new URL(fetcher.mock.calls[0][0]).searchParams.has('scope')).toBe(false);
+  });
+
   it('authorizes with Firebase, does not follow redirects and validates state, issuer and redirect target', async () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(null, { status: 302, headers: {
       Location: 'http://localhost:9876/callback?code=code&state=state&iss=https%3A%2F%2Fauth.nuberea.com',

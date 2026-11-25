@@ -24,7 +24,9 @@ async function browserSignIn(expiry: () => number) {
   if (!address || typeof address === 'string') throw new Error('Missing test callback port');
   await new Promise<void>((resolve) => server.close(() => resolve()));
   vi.mocked(exec).mockImplementation((command) => {
-    const loginUrl = new URL(command.slice('open "'.length, -1));
+    const quotedUrl = command.match(/"([^"]+)"$/)?.[1];
+    if (!quotedUrl) throw new Error('Missing browser sign-in URL');
+    const loginUrl = new URL(quotedUrl);
     const callback = new URL(loginUrl.searchParams.get('return_to')!);
     callback.searchParams.set('firebase_token', token(expiry()));
     void nativeFetch(callback).then((response) => response.text());
@@ -36,13 +38,42 @@ async function browserSignIn(expiry: () => number) {
 afterEach(() => { vi.restoreAllMocks(); vi.clearAllMocks(); vi.unstubAllGlobals(); });
 
 describe('chat Firebase credentials', () => {
-  it('shares concurrent browser sign-in and caches Firebase credentials without persisting them', async () => {
+  it('does not repopulate browser credentials when sign-in finishes after logout', async () => {
     const auth = await browserSignIn(() => Math.floor(Date.now() / 1000) + 3600);
-    const [first, second] = await Promise.all([auth.getFirebaseIdToken(), auth.getFirebaseIdToken()]);
-    expect(first).toBe(second);
-    expect(await auth.getFirebaseIdToken()).toBe(first);
-    expect(exec).toHaveBeenCalledOnce();
+    const completeBrowser = vi.mocked(exec).getMockImplementation()!;
+    let finishSignIn: (() => void) | undefined;
+    const browserStarted = new Promise<void>((resolve) => {
+      vi.mocked(exec).mockImplementation((...args) => {
+        finishSignIn = () => { completeBrowser(...args); };
+        resolve();
+        return new ChildProcess();
+      });
+    });
+    const pending = auth.getFirebaseIdToken();
+    await browserStarted;
+    await auth.logout();
+    const rejection = expect(pending).rejects.toThrow('logout');
+    finishSignIn!();
+    await rejection;
+    vi.mocked(exec).mockImplementation(completeBrowser);
+    await auth.getFirebaseIdToken();
+    expect(exec).toHaveBeenCalledTimes(2);
     expect(saveTokens).not.toHaveBeenCalled();
+  });
+
+  it.each(['darwin', 'linux', 'win32'])('shares browser sign-in on %s and caches credentials without persisting them', async (platform) => {
+    const descriptor = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: platform });
+    try {
+      const auth = await browserSignIn(() => Math.floor(Date.now() / 1000) + 3600);
+      const [first, second] = await Promise.all([auth.getFirebaseIdToken(), auth.getFirebaseIdToken()]);
+      expect(first).toBe(second);
+      expect(await auth.getFirebaseIdToken()).toBe(first);
+      expect(exec).toHaveBeenCalledOnce();
+      expect(saveTokens).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(process, 'platform', descriptor);
+    }
   });
 
   it('retains browser credentials through OAuth login but saves only OAuth tokens', async () => {

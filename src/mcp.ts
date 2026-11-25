@@ -9,6 +9,8 @@
  */
 
 import type { ToolInfo, ToolResult } from './types.js';
+import { Type } from '@sinclair/typebox';
+import { Value } from '@sinclair/typebox/value';
 
 // ============================================================================
 // MCP Protocol Types
@@ -54,6 +56,16 @@ export interface McpResourceTemplate {
   mimeType?: string;
   _meta?: Record<string, unknown>;
 }
+
+const ResourceTemplatesPageSchema = Type.Object({
+  resourceTemplates: Type.Array(Type.Object({
+    uriTemplate: Type.String(), name: Type.String(),
+    title: Type.Optional(Type.String()), description: Type.Optional(Type.String()),
+    mimeType: Type.Optional(Type.String()),
+    _meta: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
+  })),
+  nextCursor: Type.Optional(Type.String()),
+});
 
 export interface McpJsonRpcRequest {
   jsonrpc: '2.0';
@@ -239,9 +251,23 @@ export class McpClient {
   }
 
   async listResourceTemplates(): Promise<McpResourceTemplate[]> {
-    const response = await this.request('resources/templates/list');
-    if (response.error) throw new McpError(response.error.message, response.error.code);
-    return (response.result as { resourceTemplates: McpResourceTemplate[] }).resourceTemplates;
+    const templates: McpResourceTemplate[] = [];
+    const cursors = new Set<string>();
+    let cursor: string | undefined;
+    do {
+      const response = await this.request('resources/templates/list', cursor === undefined ? undefined : { cursor });
+      if (response.error) throw new McpError(response.error.message, response.error.code);
+      if (!Value.Check(ResourceTemplatesPageSchema, response.result)) {
+        throw new McpError('Invalid resources/templates/list response', -32603);
+      }
+      templates.push(...response.result.resourceTemplates);
+      cursor = response.result.nextCursor;
+      if (cursor !== undefined) {
+        if (cursors.has(cursor)) throw new McpError('Repeated resource-template cursor', -32603);
+        cursors.add(cursor);
+      }
+    } while (cursor !== undefined);
+    return templates;
   }
 
   /**

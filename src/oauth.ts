@@ -95,7 +95,9 @@ export class OAuthClient {
     const token = await this.config.getFirebaseIdToken();
     if (!token) throw new ApiError('A Firebase ID token is required for authorization', 'AUTH_REQUIRED');
     signal?.throwIfAborted();
-    const response = await this.fetcher(`${this.base}/authorize?${new URLSearchParams(request)}`, {
+    const query = new URLSearchParams();
+    for (const [name, value] of Object.entries(request)) if (value !== undefined) query.set(name, value);
+    const response = await this.fetcher(`${this.base}/authorize?${query}`, {
       method: 'GET', redirect: 'manual', signal, headers: { Authorization: `Bearer ${token}` },
     });
     if (response.status !== 302) throw await responseFailure(response, `Authorization failed (${response.status})`);

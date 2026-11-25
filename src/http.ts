@@ -37,7 +37,8 @@ export async function responseFailure(response: Response, fallback: string): Pro
   let value: unknown;
   try { value = JSON.parse(text); } catch (error) {
     if (!(error instanceof SyntaxError)) throw error;
-    return new ApiError(`${fallback}${text ? `: ${text}` : ''}`, undefined, response.status);
+    const detail = text.trim();
+    return new ApiError(`${fallback}${detail && !detail.startsWith('<') ? `: ${detail}` : ''}`, undefined, response.status);
   }
   if (!Value.Check(ErrorBody, value)) return new ApiError(fallback, undefined, response.status, value);
   return new ApiError(

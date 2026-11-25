@@ -87,6 +87,7 @@ export class NuBereaAuth {
   private tokens: StoredTokens | null = null;
   private firebaseCredential: { token: string; expiresAt: number } | null = null;
   private firebaseSignIn: Promise<string> | undefined;
+  private firebaseGeneration = 0;
 
   constructor(config?: Partial<AuthConfig>) {
     const oauthBaseUrl =
@@ -168,7 +169,11 @@ export class NuBereaAuth {
   }
 
   private async signInFirebase(): Promise<string> {
+    const generation = this.firebaseGeneration;
     const token = await this.fetchFirebaseToken();
+    if (generation !== this.firebaseGeneration) {
+      throw new Error('Firebase sign-in was cancelled by logout. Sign in again.');
+    }
     let payload: unknown;
     try {
       payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
@@ -226,6 +231,7 @@ export class NuBereaAuth {
   async logout(): Promise<void> {
     this.tokens = null;
     this.firebaseCredential = null;
+    this.firebaseGeneration++;
     await deleteTokens(this.config.tokenFile, this.config.oauthBaseUrl);
   }
 

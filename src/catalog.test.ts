@@ -3,6 +3,16 @@ import { CatalogClient } from './catalog.js';
 
 afterEach(() => vi.unstubAllGlobals());
 describe('tenant API coverage', () => {
+  it('does not expose an HTML gateway response as the catalog error detail', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html><body>Gateway failure</body></html>', {
+      status: 502, headers: { 'Content-Type': 'text/html' },
+    })));
+    const client = new CatalogClient({ baseUrl: 'https://mcp.nuberea.com', getToken: async () => 'oauth' });
+    await expect(client.listTenants()).rejects.toMatchObject({
+      status: 502, message: 'GET /v1/tenants failed (HTTP 502)',
+    });
+  });
+
   it('covers every tenant management route without live mutations', async () => {
     const calls: string[] = [];
     vi.stubGlobal('fetch', vi.fn().mockImplementation(async (url, init) => {

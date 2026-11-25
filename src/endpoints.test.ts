@@ -106,6 +106,28 @@ describe('NuBerea MCP requests', () => {
     expect(secondRequest.headers).not.toHaveProperty('mcp-session-id');
   });
 
+  it('follows resource-template cursors and fails repeated cursors rather than returning an incomplete catalog', async () => {
+    const template = { name: 'first', uriTemplate: 'resource://{id}' };
+    const fetchMock = vi.fn().mockImplementation(async (_url, init) => {
+      const request = JSON.parse(init.body);
+      return new Response(JSON.stringify({
+        jsonrpc: '2.0', id: request.id,
+        result: request.params?.cursor
+          ? { resourceTemplates: [{ ...template, name: 'second' }] }
+          : { resourceTemplates: [template], nextCursor: 'page-2' },
+      }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    const client = new NuBerea({ accessToken: 'token' });
+    expect(await client.resourceTemplates()).toEqual([template, { ...template, name: 'second' }]);
+    expect(JSON.parse(fetchMock.mock.calls[1][1].body).params).toEqual({ cursor: 'page-2' });
+    fetchMock.mockImplementation(async (_url, init) => new Response(JSON.stringify({
+      jsonrpc: '2.0', id: JSON.parse(init.body).id,
+      result: { resourceTemplates: [template], nextCursor: 'repeated' },
+    })));
+    await expect(client.resourceTemplates()).rejects.toThrow('cursor');
+  });
+
   it('rejects mismatched MCP response IDs and failed notifications instead of accepting transport-shaped successes', async () => {
     const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({
       jsonrpc: '2.0', id: 999, result: {},
