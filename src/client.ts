@@ -7,6 +7,7 @@
 
 import { NuBereaAuth, resolveMcpUrl, type AuthConfig } from './auth.js';
 import { CatalogClient } from './catalog.js';
+import { ChatClient, resolveChatBaseUrl, type ChatRequest, type ChatOptions, type ChatResponse } from './chat.js';
 import {
   McpClient,
   type McpInitializeResult,
@@ -33,6 +34,12 @@ export interface NuBereaConfig {
   mcpUrl?: string;
   /** Pre-set access token (skip login) */
   accessToken?: string;
+  /** Chat REST base, including /v1. Defaults to the API host matching baseUrl. */
+  chatBaseUrl?: string;
+  /** Firebase ID token for chat only; never used as an MCP OAuth token. */
+  firebaseIdToken?: string;
+  /** Supply refreshed Firebase credentials, e.g. () => user.getIdToken(). */
+  getFirebaseIdToken?: () => Promise<string>;
 }
 
 export type NuBereaTokens = {
@@ -50,6 +57,10 @@ export class NuBerea {
   private staticToken: string | undefined;
   private mcpClient: McpClient | null = null;
   private catalogClient: CatalogClient | null = null;
+  private chatClient: ChatClient | undefined;
+  private readonly chatBaseUrl: string | undefined;
+  private readonly firebaseTokenProvider: (() => Promise<string>) | undefined;
+  private firebaseIdToken: string | undefined;
 
   constructor(config?: NuBereaConfig) {
     this.baseUrl =
@@ -63,6 +74,9 @@ export class NuBerea {
       ?? process.env.NUBEREA_MCP_URL
       ?? resolveMcpUrl(this.baseUrl);
     this.staticToken = config?.accessToken;
+    this.firebaseIdToken = config?.firebaseIdToken;
+    this.chatBaseUrl = config?.chatBaseUrl;
+    this.firebaseTokenProvider = config?.getFirebaseIdToken;
 
     this.auth = new NuBereaAuth({
       oauthBaseUrl: this.baseUrl,
@@ -109,12 +123,23 @@ export class NuBerea {
    */
   async logout(): Promise<void> {
     this.staticToken = undefined;
+    this.firebaseIdToken = undefined;
     await this.auth.logout();
   }
 
   private async getToken(): Promise<string> {
     if (this.staticToken) return this.staticToken;
     return this.auth.getAccessToken();
+  }
+
+  /** Send a normal chat turn, stream typed activity callbacks, and return the complete done payload. */
+  async chat(request: ChatRequest, options: ChatOptions = {}): Promise<ChatResponse> {
+    this.chatClient ??= new ChatClient(
+      () => this.firebaseTokenProvider ? this.firebaseTokenProvider()
+        : this.firebaseIdToken ? Promise.resolve(this.firebaseIdToken) : this.auth.getFirebaseIdToken(),
+      this.chatBaseUrl ?? resolveChatBaseUrl(this.baseUrl),
+    );
+    return this.chatClient.send(request, options);
   }
 
   // ==========================================================================

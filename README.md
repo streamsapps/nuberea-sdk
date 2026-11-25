@@ -3,6 +3,7 @@
 Client library and CLI for the [NuBerea](https://nuberea.com) biblical data platform.
 
 Query morphological corpora, lexicons, Bible texts, manuscripts, and scrolls — via MCP tools or SQL analytics.
+Send normal streaming chat turns, including tool activity and applied reasoning-skill metadata.
 
 ## Install
 
@@ -199,6 +200,113 @@ nuberea catalog register-tool <tenantId> '{"name":"orders_by_region", ... }'
 nuberea catalog tools <tenantId>
 ```
 
+## Chat
+
+`client.chat(request, options)` sends `POST /v1/chat`, streams activity through
+callbacks, and resolves to the complete `done` response. It does not invoke MCP
+tools in place of chat.
+
+```ts
+import { NuBerea } from '@nuberea/sdk';
+
+const client = new NuBerea(); // Production by default.
+await client.login(); // Browser sign-in; keeps the Firebase ID token in memory.
+
+const response = await client.chat({
+  gptModel: '5.6 terra',
+  userMessage: 'In this stipulated system, every A is B and some B are C. Does some A being C follow? Give a countermodel if not.',
+  enabledCollections: [],
+  responseFormat: 'markdown',
+}, {
+  onChunk: (chunk) => process.stdout.write(chunk),
+  onReasoningSkills: (skills) => console.error('Applied skills:', skills),
+  onToolCallStart: (tool) => console.error('Starting tool:', tool.toolName),
+  onToolCall: (tool) => console.error('Tool result:', tool),
+});
+
+console.log(response.reasoningSkills);
+// [{ instructionId: 'reasoning.interpretation_formal', version: '1.0.0', title: 'Interpretation and formal structure' }]
+
+await client.chat({
+  gptModel: '5.6 terra',
+  userMessage: 'Revise the scope of the previous question.',
+  previous_response_id: response.responseID,
+});
+```
+
+The API chooses skills from the requested task; clients do not call a skill by
+ID. When applied, `reasoning_skills` carries `{ instructionId, version, title }`
+records before answer chunks, and `done.reasoningSkills` preserves them. No
+selection (including a routing timeout or low-confidence fallback) means no
+skill event and no final skill metadata. Frame revision requires a follow-up.
+Skill metadata reports applied advisory instructions, not an executed MCP tool.
+
+All current chat fields are supported: model, prior response ID, conversation ID,
+collections, workflow, reasoning, passage context (including edition-native
+reader targets), and `markdown` / `nuberea-rich` response formats. A managed video
+conversation uses a UUID `conversationId`; its answer and skill events are
+withheld until source validation succeeds. The server enforces plan restrictions
+and rate limits.
+
+File uploads require NuBerea Plus. Chat accepts request-scoped `attachments` with exactly `name`, `mediaType`,
+and `contentBase64`. Supported media types are PDF, plain text, Markdown, JSON,
+CSV, and TSV. Limits are five files, 10 MiB decoded in total, 4 MiB per PDF,
+10 MiB per other file, and a 15 MiB JSON request body. The SDK validates metadata,
+canonical padded base64, and byte limits before credential work. The server
+also checks readable text and extraction limits; it never silently truncates
+evidence. `libraryFileIds` is forbidden.
+
+```ts
+await client.chat({
+  gptModel: '5.6 terra',
+  userMessage: 'Summarize this supplied evidence.',
+  attachments: [{
+    name: 'notes.txt',
+    mediaType: 'text/plain',
+    contentBase64: Buffer.from('Source A dates the meeting to May.').toString('base64'),
+  }],
+});
+```
+
+File evidence lasts only for that request. Attachment turns ignore
+`previous_response_id` and return an empty `responseID` to prevent continuation
+of private file evidence. Reattach files explicitly for a later question;
+digest provenance in `sources` is not a reusable file reference.
+
+Chat requires a **Firebase ID token**, not `accessToken` (the MCP OAuth token).
+Browser credentials are never persisted and prompt for sign-in again near
+expiry. For an application already signed in with Firebase, supply a refreshing
+provider instead of opening another browser:
+
+```ts
+const client = new NuBerea({
+  getFirebaseIdToken: () => user.getIdToken(),
+});
+```
+
+For short-lived automation, `firebaseIdToken` accepts an existing ID token.
+It is the caller's responsibility to replace expired static tokens. The token
+provider takes precedence over a static token. Use `chatBaseUrl` to override the
+REST base, including `/v1`; HTTP is allowed only on loopback for local testing.
+Chat follows the OAuth host selected by `baseUrl` or `NUBEREA_BASE_URL`: production
+uses `https://api.nuberea.com/v1`; preproduction uses `https://api.nubereappe.com/v1`.
+
+Callbacks also include `onThinking` and `onEvent(event, data)` for all JSON
+events, including future event types. `signal` accepts an `AbortSignal`.
+HTTP errors, SSE `error` events, malformed responses, and streams ending without
+`done` reject rather than returning a partial answer as success. `ChatError`
+preserves the API's `code`, HTTP `status`, and `details` when available.
+Chat requests are not automatically retried.
+
+```sh
+nuberea chat '{"gptModel":"5.6 terra","userMessage":"Hello!"}'
+# Complete structured response, including reasoningSkills:
+nuberea chat '{"gptModel":"5.6 terra","userMessage":"Audit this inference: every A is B; some B are C; therefore some A are C."}' --json
+```
+
+The REST contract is available at [API documentation](https://nuberea.com/docs/api/)
+and [OpenAPI JSON](https://nuberea.com/openapi.json).
+
 ## Available Databases
 
 | Schema | Table | Description | Rows |
@@ -238,8 +346,9 @@ Run `nuberea tools` to see the full list.
 |---|---|
 | `NUBEREA_BASE_URL` | OAuth base URL (default: `https://auth.nuberea.com`) |
 | `NUBEREA_MCP_URL` | MCP transport URL (default: `https://mcp.nuberea.com/mcp`) |
-| `NUBEREA_ACCESS_TOKEN` | Pre-set access token (skip login) |
-| `NUBEREA_FIREBASE_TOKEN` | Pre-set Firebase token (skip browser sign-in) |
+| `NUBEREA_ACCESS_TOKEN` | Pre-set MCP OAuth access token (skip MCP login; not a chat credential) |
+| `NUBEREA_FIREBASE_ID_TOKEN` | Pre-set Firebase ID token for CLI chat (skip browser sign-in) |
+| `NUBEREA_CHAT_URL` | Chat REST base, including `/v1` (derived from `NUBEREA_BASE_URL` by default) |
 
 ### Programmatic
 
@@ -259,14 +368,17 @@ explicitly.
 
 ## Authentication
 
-NuBerea uses OAuth 2.1 with PKCE.
+MCP uses OAuth 2.1 with PKCE; normal chat uses a Firebase ID token.
 
 1. `nuberea login` opens your browser to `nuberea.com/login`
 2. Sign in to your nuberea account
 3. Tokens are stored per OAuth host in the OS keychain when available, otherwise
    under the platform state directory (for example,
-   `~/Library/Application Support/nuberea/tokens-auth.nuberea.com.json` on macOS)
-4. Tokens auto-refresh — you rarely need to re-login
+   `~/Library/Application Support/nuberea/tokens-auth.nuberea.com.json` on macOS).
+   Firebase ID tokens remain only in memory.
+4. OAuth tokens auto-refresh. Chat browser credentials require another sign-in
+   near expiry; applications can supply `getFirebaseIdToken` for automatic
+   Firebase refresh.
 
 Install `@nuberea/sdk` in the consuming project or reference it through an npm
 workspace/file dependency. Node.js ESM does not use `NODE_PATH` to resolve

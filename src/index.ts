@@ -29,6 +29,15 @@
 export { NuBerea } from './client.js';
 export type { NuBereaConfig, NuBereaTokens } from './client.js';
 export { MCP_ENDPOINTS, NuBereaAuth, resolveMcpUrl } from './auth.js';
+export {
+  ChatClient, ChatError, ChatRequestSchema, ChatResponseSchema, ReasoningSkillUsageSchema,
+  ScriptureReaderTargetSchema, ToolCallRecordSchema, resolveChatBaseUrl,
+  ChatAttachmentSchema, MAX_CHAT_ATTACHMENT_BYTES, MAX_CHAT_PDF_BYTES, MAX_CHAT_BODY_BYTES,
+} from './chat.js';
+export type {
+  ChatRequest, ChatResponse, ChatOptions, ChatThinking, ReasoningSkillUsage, ToolCallRecord, ScriptureReaderTarget,
+  ChatAttachment,
+} from './chat.js';
 export type { AuthConfig } from './auth.js';
 export { CatalogClient } from './catalog.js';
 export type { CatalogClientConfig } from './catalog.js';

@@ -82,6 +82,8 @@ const DEFAULT_CONFIG: AuthConfig = {
 export class NuBereaAuth {
   private config: AuthConfig;
   private tokens: StoredTokens | null = null;
+  private firebaseCredential: { token: string; expiresAt: number } | null = null;
+  private firebaseSignIn: Promise<string> | undefined;
 
   constructor(config?: Partial<AuthConfig>) {
     const oauthBaseUrl =
@@ -139,7 +141,7 @@ export class NuBereaAuth {
    * The Firebase credential is used only locally — it is never persisted.
    */
   async login(): Promise<StoredTokens> {
-    const fbToken = await this.fetchFirebaseToken();
+    const fbToken = await this.getFirebaseIdToken();
     const { verifier, challenge } = generatePkce();
     const code = await this.fetchAuthCode(fbToken, challenge);
     const tokenResponse = await this.exchangeCode(code, verifier);
@@ -152,6 +154,32 @@ export class NuBereaAuth {
 
     await saveTokens(this.tokens, this.config.tokenFile, this.config.oauthBaseUrl);
     return this.tokens;
+  }
+
+  /** Chat uses the Firebase credential, not the MCP OAuth access token. Never persisted. */
+  async getFirebaseIdToken(): Promise<string> {
+    if (this.firebaseCredential && this.firebaseCredential.expiresAt > Date.now() + 60_000) {
+      return this.firebaseCredential.token;
+    }
+    return this.firebaseSignIn ??= this.signInFirebase().finally(() => { this.firebaseSignIn = undefined; });
+  }
+
+  private async signInFirebase(): Promise<string> {
+    const token = await this.fetchFirebaseToken();
+    let payload: unknown;
+    try {
+      payload = JSON.parse(Buffer.from(token.split('.')[1] ?? '', 'base64url').toString('utf8'));
+    } catch (error) {
+      if (!(error instanceof SyntaxError)) throw error;
+      throw new Error('Firebase sign-in returned an invalid ID token', { cause: error });
+    }
+    if (typeof payload !== 'object' || payload === null || !('exp' in payload)
+      || typeof payload.exp !== 'number' || !Number.isFinite(payload.exp)
+      || payload.exp * 1000 <= Date.now() + 60_000) {
+      throw new Error('Firebase sign-in returned an expired or invalid ID token');
+    }
+    this.firebaseCredential = { token, expiresAt: payload.exp * 1000 };
+    return token;
   }
 
   /**
@@ -194,6 +222,7 @@ export class NuBereaAuth {
    */
   async logout(): Promise<void> {
     this.tokens = null;
+    this.firebaseCredential = null;
     await deleteTokens(this.config.tokenFile, this.config.oauthBaseUrl);
   }
 

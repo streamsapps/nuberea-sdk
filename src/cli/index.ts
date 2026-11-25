@@ -20,6 +20,8 @@
  */
 
 import { NuBerea } from '../client.js';
+import { ChatRequestSchema } from '../chat.js';
+import { Value } from '@sinclair/typebox/value';
 
 // ============================================================================
 // Helpers
@@ -33,6 +35,12 @@ function usage(): void {
     login                    Sign in (opens browser)
     logout                   Clear stored credentials
     status                   Check authentication status
+
+  CHAT
+    chat <request_json>      Send a normal streaming chat turn
+                             e.g., nuberea chat '{"gptModel":"5.6 terra","userMessage":"Hello!"}'
+    --json                   Print the complete response, including reasoningSkills
+    --chat-url <url>          Override Chat REST base (including /v1)
 
   MCP TOOLS
     tools                    List all available tools
@@ -86,6 +94,9 @@ function usage(): void {
     NUBEREA_BASE_URL         API base URL
     NUBEREA_MCP_URL          MCP transport URL
     NUBEREA_ACCESS_TOKEN     Pre-set access token (for CI/automation — use short-lived tokens only)
+    NUBEREA_FIREBASE_ID_TOKEN
+                             Firebase ID token for chat, not an MCP OAuth token
+    NUBEREA_CHAT_URL         Chat REST base (including /v1)
 `);
 }
 
@@ -138,6 +149,8 @@ function createClient(flags: Record<string, string | boolean>): NuBerea {
     baseUrl: (flags['base-url'] as string) ?? process.env.NUBEREA_BASE_URL,
     mcpUrl: (flags['mcp-url'] as string) ?? process.env.NUBEREA_MCP_URL,
     accessToken: (flags.token as string) ?? process.env.NUBEREA_ACCESS_TOKEN,
+    chatBaseUrl: typeof flags['chat-url'] === 'string' ? flags['chat-url'] : process.env.NUBEREA_CHAT_URL,
+    firebaseIdToken: process.env.NUBEREA_FIREBASE_ID_TOKEN,
   });
 }
 
@@ -641,6 +654,22 @@ async function main(): Promise<void> {
 
   // Tools listing doesn't need auth (public endpoint)
   if (command === 'tools') return cmdTools(client, raw);
+
+  if (command === 'chat') {
+    if (args.length !== 1) die('Use chat <request_json>');
+    const request: unknown = JSON.parse(args[0]);
+    if (!Value.Check(ChatRequestSchema, request)) {
+      const error = Value.Errors(ChatRequestSchema, request).First();
+      die(`Invalid chat request: ${error?.path} ${error?.message}`);
+    }
+    const response = await client.chat(request, raw ? {} : {
+      onChunk: (chunk) => { process.stdout.write(chunk); },
+      onReasoningSkills: (skills) => console.error(`Skills: ${skills.map((skill) => `${skill.title} (${skill.instructionId})`).join(', ')}`),
+      onToolCallStart: (tool) => console.error(`Tool: ${tool.toolName}`),
+    });
+    console.log(raw ? formatJson(response, true) : '');
+    return;
+  }
 
   // All other commands need auth — ensure we have it
   if (!flags.token && !process.env.NUBEREA_ACCESS_TOKEN && !await client.checkAuth()) {
